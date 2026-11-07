@@ -1,0 +1,29 @@
+﻿CobbleSynergy — 서버장(서버 관리자)용 안내
+
+CobbleSynergy는 CobbleLeague 0.7.1 던전에 타입 시너지를 더하는 애드온입니다.
+시너지 계산과 전투 적용은 서버에서 하므로, 서버에도 설치해야 친구들에게 적용됩니다.
+
+서버 설치
+1. 서버를 끕니다.
+2. 이 ZIP의 payload/cobblesynergy-0.2.0.jar 를 서버 mods 폴더에 넣습니다. (CobbleLeague 0.7.1 이 이미 있는 서버)
+3. 서버를 켭니다. 다른 추가 모드나 데이터팩은 필요 없습니다.
+   서버 로그에 "CobbleSynergy: 18 synergies loaded" 가 나오면 정상입니다.
+
+접속하는 사람
+- 친구들은 설치.bat 로 같은 버전을 각자 PC에 설치합니다 (화면 표시용).
+- 클라이언트에 없는 사람도 접속은 됩니다. 전투 효과는 똑같이 적용되고, HUD·도감만 보이지 않습니다.
+- 서버에 없으면 시너지는 아무에게도 적용되지 않습니다. (U 화면에 안내가 나옵니다)
+
+설정
+config/cobblesynergy/synergies.json : 시너지 숫자 (바꾸고 서버 재시작)
+config/cobblesynergy/state.json     : 시너지 켜짐/꺼짐
+- 켜기·끄기는 F4 던전 로비 창의 "시너지: 켜짐/꺼짐" 버튼, 던전 중에는 [시너지] 버튼, 또는 /synergy on · /synergy off 로 합니다.
+- 배포판에는 테스트 기능(가상 플레이어, 자동 테스트)이 들어 있지 않습니다.
+- 던전이 진행 중이 아닐 때는 누구나 바꿀 수 있습니다 (다음 게임부터 적용).
+- 던전 진행 중에는 운영자(OP)만 바꿀 수 있습니다.
+- 모두 끄고 싶으면 state.json 의 enabled 를 false 로 두고 재시작하세요.
+
+참고
+CobbleLeague 0.7.1에는 포켓몬 내보내기·회수 연출이 가끔 끝나지 않아 전투가 멈추는 문제가 있습니다.
+CobbleSynergy는 리그 차원(cobbleleague:league) 전투에서만 이런 연출이 6초 넘게 끝나지 않으면 마무리합니다.
+CobbleLeague 0.7.2 이상으로 올리면 이 기능은 자동으로 꺼집니다 (CobbleLeague가 직접 복구).

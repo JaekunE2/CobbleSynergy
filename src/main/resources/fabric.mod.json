@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "cobblesynergy",
+  "version": "${version}",
+  "name": "CobbleSynergy",
+  "description": "CobbleLeague 던전 선택 파티의 타입 조합에 따라 TFT식 시너지를 부여하는 애드온.",
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [ { "adapter": "kotlin", "value": "dev.cobblesynergy.CobbleSynergy" } ],
+    "client": [ { "adapter": "kotlin", "value": "dev.cobblesynergy.client.CobbleSynergyClient" } ]
+  },
+  "mixins": [ "cobblesynergy.mixins.json" ],
+  "depends": {
+    "fabricloader": ">=0.17.2",
+    "minecraft": "1.21.1",
+    "java": ">=21",
+    "fabric-api": "*",
+    "fabric-language-kotlin": ">=1.13.6+kotlin.2.2.20",
+    "cobblemon": "1.7.3",
+    "cobbleleague": "0.7.1"
+  }
+}
