@@ -1,3 +1,3 @@
-﻿서버와 플레이어에게 CobbleLeague 0.7.4와 CobbleSynergy 0.3.0을 같은 조합으로 배포합니다.
-페어리 설정 변경은 designVersion 4이며 다른 타입 수치는 보존합니다.
+﻿서버와 플레이어에게 CobbleLeague 0.7.7과 CobbleSynergy 0.3.3을 같은 조합으로 배포합니다.
+설정 설계 버전은 5입니다. 이전 synergies.json(설계 3·4)은 백업하고 페어리 정의만 교체하며 다른 타입 수치는 보존합니다.
 플레이어 자동 업데이트는 arscabar/CobbleLeague 통합 GitHub Release를 사용합니다. 서버 자동 업데이트는 포함하지 않습니다.
