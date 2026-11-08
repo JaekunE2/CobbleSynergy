@@ -72,29 +72,66 @@ object TestDriver {
         }
     }
 
+    /** 이번 전투에서 상대 포켓몬이 쓴 기술 이름 (Showdown 로그의 |move| 줄) */
+    private fun usedMoves(actor: BattleActor, foe: com.cobblemon.mod.common.battles.pokemon.BattlePokemon): List<String> {
+        val foeSide = actor.battle.actors.firstOrNull { it !== actor && foe in it.pokemonList }?.showdownId ?: return emptyList()
+        val keys = listOf(foe.uuid.toString(), foe.effectedPokemon.getDisplayName().string, foe.effectedPokemon.species.name)
+        return runCatching {
+            actor.battle.showdownMessages.flatMap { it.split('\n') }.filter { it.startsWith("|move|$foeSide") }
+                .mapNotNull { line -> val parts = line.split('|'); if (parts.size > 3 && keys.any { k -> parts[2].contains(k, true) }) parts[3] else null }
+        }.getOrDefault(emptyList())
+    }
+
+    /** 마지막으로 스스로 교체한 턴 (연달아 교체하지 않게) */
+    private val lastSwitch = HashMap<UUID, Int>()
+
     private fun smartPick(actor: BattleActor, active: ActiveBattlePokemon, moveset: ShowdownMoveset?, forceSwitch: Boolean): ShowdownActionResponse? {
-        val foeMon = actor.battle.sides.first { s -> actor !in s.actors }.activePokemon.firstNotNullOfOrNull { it.battlePokemon?.takeIf { b -> b.health > 0 } }
-        val foe = foeMon?.let { BotBrain.types(it.effectedPokemon) }.orEmpty()
+        val foeBp = actor.battle.sides.first { s -> actor !in s.actors }.activePokemon.firstNotNullOfOrNull { it.battlePokemon?.takeIf { b -> b.health > 0 } }
+        val foe = foeBp?.let { BotBrain.types(it.effectedPokemon) }.orEmpty()
+        val attacks = foeBp?.let { BotBrain.predictAttacks(it.effectedPokemon, usedMoves(actor, it)) }.orEmpty()
         val activeIds = actor.activePokemon.mapNotNull { it.battlePokemon?.uuid }.toSet()
         val bench = actor.pokemonList.filter { it.health > 0 && !it.gone && it.uuid !in activeIds && !it.willBeSwitchedIn }
+        fun hpOf(b: com.cobblemon.mod.common.battles.pokemon.BattlePokemon) = b.health.toDouble() / b.maxHealth.coerceAtLeast(1)
+        /** 상대 예상 공격을 얼마나 버티고 얼마나 아프게 때리는지 */
+        fun counter(b: com.cobblemon.mod.common.battles.pokemon.BattlePokemon): Double {
+            val mon = b.effectedPokemon
+            val taken = if (attacks.isEmpty()) 1.0 else BotBrain.danger(mon, attacks)
+            return BotBrain.offense(mon, foe) * 2 - taken * 2 + hpOf(b) + BotBrain.bst(mon) / 600.0
+        }
         fun switchTo(b: com.cobblemon.mod.common.battles.pokemon.BattlePokemon): ShowdownActionResponse {
             b.willBeSwitchedIn = true
+            lastSwitch[actor.uuid] = actor.battle.turn
             return SwitchActionResponse(b.uuid)
         }
         if (forceSwitch || moveset == null) {
-            val best = bench.maxByOrNull { BotBrain.switchScore(it.effectedPokemon, foe) } ?: return null
-            return switchTo(best)
+            val best = bench.maxByOrNull { counter(it) } ?: return null
+            // 내보낼 포켓몬마저 상대 예상 공격에 약하면 이 상대를 기억해 다음 영입에서 대항할 포켓몬을 찾는다
+            if (foeBp != null && attacks.isNotEmpty() && BotBrain.danger(best.effectedPokemon, attacks) >= 2) BotBrain.noteProblem(actor.uuid, foeBp.effectedPokemon, 1.0)
+            return best.let(::switchTo)
         }
         val self = active.battlePokemon ?: return null
-        val hp = self.health.toDouble() / self.maxHealth.coerceAtLeast(1)
+        val hp = hpOf(self)
         val usable = moveset.moves.filter { !it.disabled && it.pp > 0 }
         if (usable.isEmpty()) return null
-        val scored = usable.map { it to BotBrain.battleMoveScore(self.effectedPokemon, it.id, foe, hp) }
-        val (move, score) = scored.maxBy { it.second }
-        // 쓸 기술이 거의 안 통하면(무효·반감뿐) 더 유리한 포켓몬으로 교체 (갇힘 상태면 Showdown 이 거절하므로 기술로 대체)
-        if (score < 35 && !moveset.trapped && bench.isNotEmpty()) {
-            val best = bench.maxBy { BotBrain.switchScore(it.effectedPokemon, foe) }
-            if (BotBrain.switchScore(best.effectedPokemon, foe) > BotBrain.switchScore(self.effectedPokemon, foe) + 1.0) return switchTo(best)
+        val (move, score) = usable.map { it to BotBrain.battleMoveScore(self.effectedPokemon, it.id, foe, hp) }.maxBy { it.second }
+
+        // 교체는 확실히 이득일 때만: (1) 지금 포켓몬이 상대 예상 공격에 약점이고 약점을 찌를 기술도 없거나,
+        // (2) 쓸 기술이 전부 거의 안 통할 때. 그리고 들어갈 포켓몬이 그 공격을 반감 이하로 받고, 체력이 절반 이상이며,
+        // 상대에게 지금 포켓몬보다 분명히 더 아프게 때릴 수 있어야 한다. 2턴 안에 다시 교체하지 않는다.
+        val recent = actor.battle.turn - (lastSwitch[actor.uuid] ?: -99) < 2
+        if (foeBp != null && !moveset.trapped && !recent && bench.isNotEmpty()) {
+            val inDanger = attacks.isNotEmpty() && BotBrain.danger(self.effectedPokemon, attacks) >= 2 && BotBrain.offense(self.effectedPokemon, foe) < 2
+            val useless = score < 35
+            if (inDanger || useless) {
+                val safe = bench.filter { b -> hpOf(b) >= 0.5 && (attacks.isEmpty() || BotBrain.danger(b.effectedPokemon, attacks) <= 0.5) }
+                val best = safe.maxByOrNull { counter(it) }
+                if (best != null && counter(best) >= counter(self) + 2.0 && BotBrain.offense(best.effectedPokemon, foe) >= 1.0) {
+                    TestLog.log("driver", "${actor.showdownId} 교체: ${self.effectedPokemon.species.name} → ${best.effectedPokemon.species.name} (상대 예상 공격 ${attacks.joinToString("/")})")
+                    return switchTo(best)
+                }
+                // 대항할 포켓몬이 없으면 그대로 싸우고, 이 상대를 기억한다
+                BotBrain.noteProblem(actor.uuid, foeBp.effectedPokemon, if (inDanger) 0.5 else 0.3)
+            }
         }
         val chosen = if (Math.random() < 0.1) usable.random() else move // 10% 는 다른 기술로 예측을 피한다
         val target = runCatching { chosen.getTargets(active)?.firstOrNull()?.getPNX() }.getOrNull()

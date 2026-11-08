@@ -71,6 +71,7 @@ object DungeonBot {
         /** 기억한 기술: 포켓몬 uuid → (기술 이름, 바꿀 칸). 돈이 생기면 기술머신으로 산다. */
         val wishes = HashMap<UUID, Pair<String, Int>>()
         var rewardStep = ""
+        var fainted = 0
     }
     private val pilots = HashMap<UUID, Pilot>()
     val autoPlayers = HashSet<UUID>()
@@ -132,7 +133,7 @@ object DungeonBot {
         runCatching { LeagueMod.service?.disconnect(p.uuid) }.onFailure { TestLog.log("bot", "던전 정리 실패: $it") }
         runCatching { BattleRegistry.getBattleByParticipatingPlayer(p)?.stop() }
         runCatching { server.playerList.remove(p) }.onFailure { TestLog.log("bot", "접속 해제 실패: $it") }
-        bots.remove(p.uuid); pilots.remove(p.uuid)
+        bots.remove(p.uuid); pilots.remove(p.uuid); BotBrain.forget(p.uuid)
         TestLog.log("bot", "가상 플레이어 접속 해제 ${p.scoreboardName}")
     }
 
@@ -272,11 +273,11 @@ object DungeonBot {
                        displays: List<Pair<PokemonEntity, Vec3>>, choices: List<String>, now: Int) {
         val party = (call(run, "getParty") as PlayerPartyStore).toList()
         val threats = threats(service, p.uuid)
-        val now0 = BotBrain.partyScore(party, threats)
+        val now0 = BotBrain.partyScore(party, threats, p.uuid)
         var best = -1; var bestSlot = -1; var bestScore = Double.NEGATIVE_INFINITY
         for ((i, d) in displays.withIndex()) {
             if (i >= choices.size || d.first.isRemoved) continue
-            val (score, slot) = BotBrain.bestPlacement(party, d.first.pokemon, threats)
+            val (score, slot) = BotBrain.bestPlacement(party, d.first.pokemon, threats, p.uuid)
             if (score > bestScore) { bestScore = score; best = i; bestSlot = slot }
         }
         if (best < 0) return
@@ -375,8 +376,8 @@ object DungeonBot {
         pilot.rewardStep = "done:$token:${prep.revision}"
         val party = (call(run, "getParty") as PlayerPartyStore).toList()
         val threats = threats(service, p.uuid)
-        val (score, slot) = BotBrain.bestPlacement(party, mon, threats)
-        if (score > BotBrain.partyScore(party, threats)) {
+        val (score, slot) = BotBrain.bestPlacement(party, mon, threats, p.uuid)
+        if (score > BotBrain.partyScore(party, threats, p.uuid)) {
             val replaced = if (slot >= 0) " (${party[slot].species.translatedName.string} 대신)" else ""
             say(p.server, "[${who(p)}] 보상 영입: ${mon.species.translatedName.string}(${typesText(mon)})$replaced")
             act(p, pilot, now, "reward_accept") {
@@ -395,11 +396,21 @@ object DungeonBot {
     private fun battle(p: ServerPlayer, pilot: Pilot, b: PokemonBattle, now: Int) {
         if (pilot.lastBattle != b.battleId) {
             pilot.lastBattle = b.battleId; pilot.answered = null; pilot.scheduled = null; pilot.retries = 0
-            pilot.lastTurn = -1; pilot.lastTurnAt = now; pilot.stalls = 0
+            pilot.lastTurn = -1; pilot.lastTurnAt = now; pilot.stalls = 0; pilot.fainted = 0
+            BotBrain.newBattle(p.uuid)
             TestLog.log("bot", "${p.scoreboardName} 전투 시작 battle=${b.battleId} 상대=${b.actors.filter { p.uuid !in it.getPlayerUUIDs() }.joinToString { it.getName().string }}")
         }
         if (b.ended) return
         val actor = b.actors.firstOrNull { p.uuid in it.getPlayerUUIDs() } ?: return
+        // 우리 포켓몬이 쓰러지면 그때 상대 현재 포켓몬을 기억한다 (다음 영입에서 대항할 포켓몬을 고른다)
+        val down = actor.pokemonList.count { it.health <= 0 }
+        if (down > pilot.fainted) {
+            pilot.fainted = down
+            b.actors.firstOrNull { it !== actor }?.activePokemon?.firstNotNullOfOrNull { it.battlePokemon?.takeIf { f -> f.health > 0 } }?.let { foe ->
+                BotBrain.noteProblem(p.uuid, foe.effectedPokemon, 1.0)
+                TestLog.log("bot", "${p.scoreboardName} 기억: ${foe.effectedPokemon.species.name} 에게 쓰러짐 · 대항 필요 ${BotBrain.problemsText(p.uuid)}")
+            }
+        }
         if (b.turn != pilot.lastTurn) { pilot.lastTurn = b.turn; pilot.lastTurnAt = now }
         val stuck = now - pilot.lastTurnAt >= 200
         if (stuck && (now - pilot.lastTurnAt) % 200 == 0) {

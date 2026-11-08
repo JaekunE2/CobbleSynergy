@@ -89,13 +89,13 @@ object BotBrain {
         return score * 6.0 / threats.size.coerceAtLeast(6) // 상대 파티 크기와 상관없이 같은 크기로
     }
 
-    fun partyScore(party: List<Pokemon>, threats: List<Pokemon>): Double =
-        synergyScore(party) + party.sumOf { strength(it) } + matchupScore(party, threats)
+    fun partyScore(party: List<Pokemon>, threats: List<Pokemon>, owner: java.util.UUID? = null): Double =
+        synergyScore(party) + party.sumOf { strength(it) } + matchupScore(party, threats) + counterScore(owner, party)
 
     /** 후보를 넣을 때 가장 좋은 결과: (점수, 바꿀 칸 또는 -1) */
-    fun bestPlacement(party: List<Pokemon>, candidate: Pokemon, threats: List<Pokemon>): Pair<Double, Int> {
-        if (party.size < 6) return partyScore(party + candidate, threats) to -1
-        return party.indices.map { slot -> partyScore(party.toMutableList().also { it[slot] = candidate }, threats) to slot }
+    fun bestPlacement(party: List<Pokemon>, candidate: Pokemon, threats: List<Pokemon>, owner: java.util.UUID? = null): Pair<Double, Int> {
+        if (party.size < 6) return partyScore(party + candidate, threats, owner) to -1
+        return party.indices.map { slot -> partyScore(party.toMutableList().also { it[slot] = candidate }, threats, owner) to slot }
             .maxBy { it.first }
     }
 
@@ -160,6 +160,61 @@ object BotBrain {
         }
         return best
     }
+
+    // ------------------------------------------------------------------ 기억: 대항하지 못한 상대
+
+    /** AI 트레이너별로 고전한 상대 포켓몬의 타입 조합과 무게. 새 전투마다 조금씩 잊는다. */
+    private val problems = HashMap<java.util.UUID, HashMap<String, Double>>()
+
+    /** 대항할 포켓몬이 없었거나 우리 포켓몬을 쓰러뜨린 상대를 기억한다 */
+    fun noteProblem(owner: java.util.UUID, foe: Pokemon, weight: Double) {
+        val key = types(foe).sorted().joinToString("/")
+        val m = problems.getOrPut(owner) { HashMap() }
+        m[key] = ((m[key] ?: 0.0) + weight).coerceAtMost(6.0)
+    }
+
+    fun newBattle(owner: java.util.UUID) {
+        problems[owner]?.let { m -> m.replaceAll { _, w -> w * 0.75 }; m.values.removeIf { it < 0.3 } }
+    }
+
+    fun forget(owner: java.util.UUID) { problems.remove(owner) }
+
+    fun problemsText(owner: java.util.UUID): String = problems[owner].orEmpty().entries.sortedByDescending { it.value }.take(4)
+        .joinToString(", ") { (k, w) -> k.split('/').joinToString("/") { SynergyEngine.TYPE_KO[it] ?: it } + " ×" + "%.1f".format(w) }
+
+    /** 기억한 상대마다 파티 안에서 가장 잘 대항하는 포켓몬(그 상대의 자속을 반감 이하로 받고, 자속으로 약점을 찌름)의 점수 */
+    fun counterScore(owner: java.util.UUID?, party: List<Pokemon>): Double {
+        val m = owner?.let { problems[it] } ?: return 0.0
+        var score = 0.0
+        for ((key, w) in m) {
+            val foe = key.split('/')
+            val best = party.maxOfOrNull { mon ->
+                val mt = types(mon)
+                val taken = foe.maxOf { effectiveness(it, mt) }
+                val dealt = mt.maxOf { effectiveness(it, foe) }
+                (if (taken <= 0.5) 3.0 else if (taken < 2) 1.0 else -1.0) + (if (dealt >= 2) 3.0 else 0.0)
+            } ?: 0.0
+            score += best * w * 1.5
+        }
+        return score.coerceIn(-20.0, 40.0)
+    }
+
+    // ------------------------------------------------------------------ 상대 공격 예상
+
+    private fun moveId(name: String) = name.lowercase().filter { it.isLetterOrDigit() }
+
+    /** 상대가 쓸 공격 타입 예상: 자속 타입 + 이번 전투에서 실제로 쓴 공격기의 타입 */
+    fun predictAttacks(foe: Pokemon, usedMoves: Collection<String>): Set<String> {
+        val seen = usedMoves.mapNotNull { Moves.getByName(moveId(it)) }.filter { !isStatus(it) }.map { it.elementalType.name.lowercase() }
+        return (types(foe) + seen).toSet()
+    }
+
+    /** 예상 공격 중 가장 아픈 배율 */
+    fun danger(mon: Pokemon, attacks: Set<String>): Double = attacks.maxOfOrNull { effectiveness(it, types(mon)) } ?: 1.0
+
+    /** 우리 포켓몬이 가진 공격기로 상대에게 줄 수 있는 가장 큰 배율 (자속 1.5 포함) */
+    fun offense(mon: Pokemon, foe: List<String>): Double = mon.moveSet.getMoves().filter { !isStatus(it.template) }
+        .maxOfOrNull { m -> val t = m.template.elementalType.name.lowercase(); effectiveness(t, foe) * (if (t in types(mon)) 1.5 else 1.0) } ?: 0.0
 
     // ------------------------------------------------------------------ 전투
 
