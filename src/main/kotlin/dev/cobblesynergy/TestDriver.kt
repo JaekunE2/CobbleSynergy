@@ -74,7 +74,7 @@ object TestDriver {
 
     /** 이번 전투에서 상대 포켓몬이 쓴 기술 이름 (Showdown 로그의 |move| 줄) */
     private fun usedMoves(actor: BattleActor, foe: com.cobblemon.mod.common.battles.pokemon.BattlePokemon): List<String> {
-        val foeSide = actor.battle.actors.firstOrNull { it !== actor && foe in it.pokemonList }?.showdownId ?: return emptyList()
+        val foeSide = actor.battle.actors.firstOrNull { foe in it.pokemonList }?.showdownId ?: return emptyList()
         val keys = listOf(foe.uuid.toString(), foe.effectedPokemon.getDisplayName().string, foe.effectedPokemon.species.name)
         return runCatching {
             actor.battle.showdownMessages.flatMap { it.split('\n') }.filter { it.startsWith("|move|$foeSide") }
@@ -113,7 +113,12 @@ object TestDriver {
         val hp = hpOf(self)
         val usable = moveset.moves.filter { !it.disabled && it.pp > 0 }
         if (usable.isEmpty()) return null
-        val (move, score) = usable.map { it to BotBrain.battleMoveScore(self.effectedPokemon, it.id, foe, hp) }.maxBy { it.second }
+        // 이 포켓몬이 이번 전투에서 쓴 기술 (능력 올리기·장판 같은 변화기를 몇 번 썼는지)
+        val mine = usedMoves(actor, self).map { n -> n.lowercase().filter { c -> c.isLetterOrDigit() } }
+        val foeStatused = foeBp?.effectedPokemon?.status != null
+        val (move, score) = usable.map {
+            it to BotBrain.battleMoveScore(self.effectedPokemon, it.id, foe, hp, foeStatused, mine.count { n -> n == it.id })
+        }.maxBy { it.second }
 
         // 교체는 확실히 이득일 때만: (1) 지금 포켓몬이 상대 예상 공격에 약점이고 약점을 찌를 기술도 없거나,
         // (2) 쓸 기술이 전부 거의 안 통할 때. 그리고 들어갈 포켓몬이 그 공격을 반감 이하로 받고, 체력이 절반 이상이며,
@@ -133,7 +138,9 @@ object TestDriver {
                 BotBrain.noteProblem(actor.uuid, foeBp.effectedPokemon, if (inDanger) 0.5 else 0.3)
             }
         }
-        val chosen = if (Math.random() < 0.1) usable.random() else move // 10% 는 다른 기술로 예측을 피한다
+        // 10% 는 다른 기술로 예측을 피한다 (단, 최고 점수의 절반 이상인 기술 중에서만)
+        val alternatives = usable.filter { BotBrain.battleMoveScore(self.effectedPokemon, it.id, foe, hp, foeStatused, mine.count { n -> n == it.id }) >= score * 0.5 }
+        val chosen = if (Math.random() < 0.1 && alternatives.isNotEmpty()) alternatives.random() else move
         val target = runCatching { chosen.getTargets(active)?.firstOrNull()?.getPNX() }.getOrNull()
         val r = MoveActionResponse(chosen.id, target, null)
         return if (runCatching { r.isValid(active, moveset, false) }.getOrDefault(true)) r else null

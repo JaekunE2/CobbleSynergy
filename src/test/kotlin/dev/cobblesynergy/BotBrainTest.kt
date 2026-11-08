@@ -16,3 +16,14 @@ class BotBrainTest {
         assertEquals(2.0, BotBrain.effectiveness("ice", listOf("dragon")))
     }
 }
+
+class SetDataNameTest {
+    @Test
+    fun showdownNamesMapToCobblemonIds() {
+        assertEquals("cobblemon:heavy_duty_boots", SetData.itemId("Heavy-Duty Boots"))
+        assertEquals("cobblemon:loaded_dice", SetData.itemId("Loaded Dice"))
+        assertEquals("cobblemon:kings_rock", SetData.itemId("King's Rock"))
+        assertEquals("softboiled", SetData.key("Soft-Boiled"))
+        assertEquals("taurospaldeaaqua", SetData.key("Tauros-Paldea-Aqua"))
+    }
+}

@@ -1,4 +1,4 @@
-﻿CobbleSynergy 0.3.5 / CobbleLeague 0.7.7
+﻿CobbleSynergy 0.3.6 / CobbleLeague 0.7.7
 
 플레이어는 코블리그 통합 친구용 설치 ZIP을 사용합니다. 설치 후 Modrinth Play에서 업데이트 확인과 동일 프로필 재실행을 제공합니다.
 U: 도감 / F4: 시너지와 경기 관전.

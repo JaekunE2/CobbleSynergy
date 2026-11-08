@@ -72,6 +72,8 @@ object DungeonBot {
         val wishes = HashMap<UUID, Pair<String, Int>>()
         var rewardStep = ""
         var fainted = 0
+        /** 돈을 모으는 중인 아이템 (없으면 null) */
+        var savingFor: String? = null
     }
     private val pilots = HashMap<UUID, Pilot>()
     val autoPlayers = HashSet<UUID>()
@@ -98,6 +100,7 @@ object DungeonBot {
 
     /** 가상 플레이어를 count 명까지 접속시킨다 (SynergyBot1, SynergyBot2 ...) */
     fun spawn(server: MinecraftServer, near: ServerPlayer?, count: Int = 1): String {
+        SetData.ensure() // 판단 보조 세트 자료 (처음 한 번, 백그라운드)
         val want = count.coerceIn(1, MAX_BOTS)
         val level = near?.serverLevel() ?: server.overworld()
         var added = 0
@@ -217,7 +220,7 @@ object DungeonBot {
                 if (now - pilot.offeredAt < 40) return // 후보가 다 나올 때까지 2초 기다린다
                 // 돈 사용 1: 라운드마다 한 번, 돈이 3 이상이면 무작위 분류의 뽑기 확률 강화
                 val roundKey = runCatching { call(call(game!!, "getModel")!!, "getRound").toString() }.getOrDefault("?")
-                if (pilot.boostedFor != roundKey && prep.money >= 3) {
+                if (pilot.boostedFor != roundKey && pilot.savingFor == null && prep.money >= 4) { // 아이템을 위해 돈을 모으는 중이면 쓰지 않는다
                     pilot.boostedFor = roundKey
                     val kind = LeagueBridge.allCategories().random()
                     act(p, pilot, now, "odds_boost") { addProperty("category", kind.id); addProperty("revision", prep.revision) }
@@ -304,7 +307,7 @@ object DungeonBot {
         val replaced = if (bestSlot >= 0) " (${party[bestSlot].species.translatedName.string} 대신)" else ""
         runCatching { pickMethod(service).invoke(service, p, json, true) }
             .onSuccess {
-                val why = "종족값 ${BotBrain.bst(mon)} · 점수 +${"%.0f".format(gain)}"
+                val why = "${BotBrain.role(mon).ko} · 종족값 ${BotBrain.bst(mon)} · 점수 +${"%.0f".format(gain)}"
                 TestLog.log("bot", "${p.scoreboardName} 영입: ${mon.species.translatedName.string}(${typesText(mon)})$replaced $why")
                 say(p.server, "[${who(p)}] 영입: ${mon.species.translatedName.string}(${typesText(mon)})$replaced · $why")
                 remember(p, pilot, run, threats)
@@ -338,14 +341,14 @@ object DungeonBot {
         // 무료 학습이 없을 때는 돈을 장비에도 써야 하므로 이득이 충분히 큰 기술만 산다
         val pick = party.filter { it.uuid in pilot.wishes }
             .mapNotNull { mon -> BotBrain.bestLesson(mon, learnable(mon), threats)?.let { mon to it } }
-            .filter { (_, l) -> prep.freeLessons > 0 || l.third >= 35 }
+            .filter { (_, l) -> prep.freeLessons > 0 || (l.third >= 35 && (pilot.savingFor == null || l.third >= bestItemGain(run, prep.money))) }
             .maxByOrNull { it.second.third } ?: return false
         val (mon, lesson) = pick
         val (move, slot, gain) = lesson
         pilot.boughtFor = key
         val old = mon.moveSet[slot]?.template?.displayName?.string ?: "빈 칸"
         TestLog.log("bot", "${p.scoreboardName} 기술 구매: ${mon.species.translatedName.string} $old → ${move.displayName.string} (이득 ${"%.0f".format(gain)}, ${if (prep.freeLessons > 0) "무료 학습" else "${DungeonShop.TM_PRICE}원"})")
-        say(p.server, "[${who(p)}] 기술 학습: ${mon.species.translatedName.string} $old → ${move.displayName.string}")
+        say(p.server, "[${who(p)}] 기술 학습(${BotBrain.role(mon).ko}): ${mon.species.translatedName.string} $old → ${move.displayName.string}")
         act(p, pilot, now, "buy") {
             addProperty("pokemon", mon.uuid.toString()); addProperty("operation", "tm"); addProperty("move", move.name)
             addProperty("slot", slot); addProperty("revision", prep.revision)
@@ -488,30 +491,91 @@ object DungeonBot {
         user?.sendSystemMessage(Component.literal("[시너지 테스트] F4 로비에서 대기 완료를 누르면 던전이 시작됩니다. 본인은 직접 플레이합니다.").withStyle(ChatFormatting.AQUA))
     }
 
-    private val CONSUMABLE = setOf("minecraft:gold_nugget", "cobblemon:ability_capsule", "cobblemon:max_mushrooms", "cobblemon:max_soup") // 육성 소모품은 사지 않는다
+    private val CONSUMABLE = setOf("minecraft:gold_nugget", "cobblemon:ability_capsule", "cobblemon:max_mushrooms", "cobblemon:max_soup",
+        "mega_showdown:dynamax_candy", "mega_showdown:max_soup") // 육성 소모품은 사지 않는다
 
     private fun who(p: ServerPlayer) = if (p.uuid in bots) p.scoreboardName else "자동 조작 ${p.scoreboardName}"
 
-    /** CobbleLeague 0.7.3 의 배틀 소모품 표시 (0.7.1 에는 없다) */
-    private fun consumable(product: Any): Boolean =
-        runCatching { product.javaClass.getMethod("getConsumable").invoke(product) as Boolean }.getOrDefault(false)
+    private fun itemKey(mon: Pokemon) = net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(mon.heldItem().item).toString()
+        .let { if (mon.heldItem().isEmpty) "" else it }
 
-    /** 장비 하나를 산다. 산 것이 있으면 true */
+    /** 구매 후보: 포켓몬, 아이템, 가격(보관함에 있으면 0), 지금 아이템보다 나아지는 정도 */
+    private class Offer(val mon: Pokemon, val item: String, val price: Int, val gain: Double, val owned: Boolean)
+
+    private fun offers(run: Any, party: List<Pokemon>): List<Offer> {
+        @Suppress("UNCHECKED_CAST")
+        val stock = (field(run, "equipment") as? Map<String, Int>).orEmpty().filterValues { it > 0 }.keys
+        val shop = DungeonShop.products.filter { it.id !in CONSUMABLE }
+        val list = ArrayList<Offer>()
+        for (mon in party) {
+            val now = BotBrain.itemValue(mon, itemKey(mon))
+            for (id in stock) if (id !in CONSUMABLE && !id.contains("choice")) BotBrain.itemValue(mon, id).let { v -> if (v - now > 8) list += Offer(mon, id, 0, v - now, true) }
+            for (pr in shop) BotBrain.itemValue(mon, pr.id).let { v -> if (v - now > 8) list += Offer(mon, pr.id, pr.price, v - now, false) }
+        }
+        // 같은 아이템을 두 마리에게 주는 것보다 서로 다른 아이템이 좋다 (구애 계열은 특히)
+        return list.sortedByDescending { it.gain }
+    }
+
+    /**
+     * 준비 단계 구매 계획.
+     *  1. 보관함에 있는 쓸 만한 아이템은 공짜로 바로 장착
+     *  2. 기술(무료 학습 우선)과 아이템 중 이득이 가장 큰 것을 산다
+     *  3. 가장 원하는 아이템이 지금 돈으로 안 되고 1~2원만 모자라면, 그보다 훨씬 못한 것은 사지 않고 돈을 모은다
+     * 산 것이 있으면 true
+     */
     private fun shop(p: ServerPlayer, pilot: Pilot, run: Any, prep: DraftPreparation, now: Int): Boolean {
         val party = (call(run, "getParty") as PlayerPartyStore).toList()
-        val holder = party.firstOrNull { it.heldItem().isEmpty } ?: return false
-        val product = DungeonShop.products.filter { it.id !in CONSUMABLE && !consumable(it) && it.price <= prep.money }
-            .maxByOrNull { it.price * 10 + (0..9).random() } ?: return false
-        val key = "${prep.revision}:${holder.uuid}"
+        val key = "shop:${prep.revision}"
         if (pilot.boughtFor == key) return false // 같은 상태에서 이미 시도함 (거절되면 준비 완료로 넘어간다)
+        val all = offers(run, party)
+        all.firstOrNull { it.owned }?.let { o ->
+            pilot.boughtFor = key
+            say(p.server, "[${who(p)}] 보관 도구 장착: ${o.mon.species.translatedName.string} ← ${itemName(o.item)}")
+            act(p, pilot, now, "buy") {
+                addProperty("pokemon", o.mon.uuid.toString()); addProperty("product", o.item)
+                addProperty("operation", "owned"); addProperty("revision", prep.revision)
+            }
+            return true
+        }
+        val top = all.firstOrNull()
+        if (top == null) { pilot.savingFor = null; return false }
+        val affordable = all.filter { it.price <= prep.money }
+        // 돈 모으기: 가장 원하는 것이 비싸서 못 사고, 조금만 모으면 살 수 있으면 그보다 한참 못한 것은 사지 않는다
+        if (top.price > prep.money && top.price - prep.money <= 2 && top.gain >= 40) {
+            val good = affordable.firstOrNull { it.gain >= top.gain * 0.75 }
+            if (good == null) {
+                val label = "${top.mon.species.translatedName.string}의 ${itemName(top.item)} (${top.price}원)"
+                if (pilot.savingFor != label) {
+                    pilot.savingFor = label
+                    say(p.server, "[${who(p)}] 돈 모으는 중: $label · 지금 ${prep.money}원")
+                    TestLog.log("bot", "${p.scoreboardName} 돈 모으기: $label 이득 ${"%.0f".format(top.gain)}")
+                }
+                return false
+            }
+        }
+        val pick = affordable.firstOrNull() ?: return false
+        pilot.savingFor = null
         pilot.boughtFor = key
-        TestLog.log("bot", "${p.scoreboardName} 구매 시도: ${product.id}(${product.price}) → ${holder.species.translatedName.string} · 돈 ${prep.money}")
+        val old = if (pick.mon.heldItem().isEmpty) "없음" else itemName(itemKey(pick.mon))
+        TestLog.log("bot", "${p.scoreboardName} 구매: ${pick.item}(${pick.price}) → ${pick.mon.species.translatedName.string} (${BotBrain.role(pick.mon).ko}, 이득 ${"%.0f".format(pick.gain)}) · 돈 ${prep.money}")
+        say(p.server, "[${who(p)}] 도구 구매: ${pick.mon.species.translatedName.string}(${BotBrain.role(pick.mon).ko}) $old → ${itemName(pick.item)} · ${pick.price}원")
         act(p, pilot, now, "buy") {
-            addProperty("pokemon", holder.uuid.toString()); addProperty("product", product.id)
+            addProperty("pokemon", pick.mon.uuid.toString()); addProperty("product", pick.item)
             addProperty("operation", "buy"); addProperty("revision", prep.revision)
         }
         return true
     }
+
+    private fun itemName(id: String): String = runCatching {
+        net.minecraft.core.registries.BuiltInRegistries.ITEM.get(net.minecraft.resources.ResourceLocation.parse(id)).description.string
+    }.getOrDefault(id)
+
+    /** 아이템 계획의 가장 큰 이득 (기술 구매와 비교용) */
+    private fun bestItemGain(run: Any, money: Int): Double {
+        val party = runCatching { (call(run, "getParty") as PlayerPartyStore).toList() }.getOrDefault(emptyList())
+        return offers(run, party).filter { it.price <= money + 2 }.maxOfOrNull { it.gain } ?: 0.0
+    }
+
 
     private fun act(p: ServerPlayer, pilot: Pilot, now: Int, action: String, body: JsonObject.() -> Unit = {}) {
         pilot.lastAction = now
