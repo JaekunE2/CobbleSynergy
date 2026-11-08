@@ -44,7 +44,6 @@ import java.util.UUID
 object DungeonBot {
     const val NAME = "SynergyBot"
     private fun uuidOf(name: String): UUID = UUID.nameUUIDFromBytes("OfflinePlayer:$name".toByteArray())
-    private const val PROTOCOL = 9 // CobbleLeague 0.7.1 클라이언트 프로토콜
     const val MAX_BOTS = 7 // 로비 정원 8명 - 본인
 
     private val bots = LinkedHashMap<UUID, ServerPlayer>()
@@ -112,7 +111,7 @@ object DungeonBot {
                 .onFailure { TestLog.log("bot", "스타터 처리 실패: $it") }
             bots[id] = player
             pilots.remove(id)
-            request(player, "hello") { addProperty("protocol", PROTOCOL) }
+            request(player, "hello") { addProperty("protocol", LeagueCompat.protocol) }
             TestLog.log("bot", "가상 플레이어 접속 $name uuid=$id")
             added++
         }
@@ -228,7 +227,17 @@ object DungeonBot {
             }
             "REWARDS" -> {
                 val readySet = call(game!!, "getRewardReady") as? Set<*> ?: return
-                if (p.uuid !in readySet) act(p, pilot, now, "reward_done")
+                if (p.uuid in readySet) return
+                // CobbleLeague 0.7.3: 관장전 승리 보상은 하나를 먼저 골라야 확인 완료할 수 있다
+                val choice = field(run, "gymReward")?.let { field(it, "choice") }
+                if (choice != null && call(choice, "getSelected") == null) {
+                    @Suppress("UNCHECKED_CAST")
+                    val options = call(choice, "getOptions") as? List<Enum<*>> ?: emptyList()
+                    val prize = options.firstOrNull { it.name == "MONEY" } ?: options.firstOrNull() ?: return
+                    act(p, pilot, now, "gym_reward_choose") { addProperty("token", call(choice, "getToken").toString()); addProperty("prize", prize.name) }
+                    return
+                }
+                act(p, pilot, now, "reward_done")
             }
         }
     }
@@ -373,11 +382,15 @@ object DungeonBot {
 
     private fun who(p: ServerPlayer) = if (p.uuid in bots) p.scoreboardName else "자동 조작 ${p.scoreboardName}"
 
+    /** CobbleLeague 0.7.3 의 배틀 소모품 표시 (0.7.1 에는 없다) */
+    private fun consumable(product: Any): Boolean =
+        runCatching { product.javaClass.getMethod("getConsumable").invoke(product) as Boolean }.getOrDefault(false)
+
     /** 장비 하나를 산다. 산 것이 있으면 true */
     private fun shop(p: ServerPlayer, pilot: Pilot, run: Any, prep: DraftPreparation, now: Int): Boolean {
         val party = (call(run, "getParty") as PlayerPartyStore).toList()
         val holder = party.firstOrNull { it.heldItem().isEmpty } ?: return false
-        val product = DungeonShop.products.filter { it.id !in CONSUMABLE && it.price <= prep.money }
+        val product = DungeonShop.products.filter { it.id !in CONSUMABLE && !consumable(it) && it.price <= prep.money }
             .maxByOrNull { it.price * 10 + (0..9).random() } ?: return false
         val key = "${prep.revision}:${holder.uuid}"
         if (pilot.boughtFor == key) return false // 같은 상태에서 이미 시도함 (거절되면 준비 완료로 넘어간다)

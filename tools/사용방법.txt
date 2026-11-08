@@ -1,16 +1,16 @@
-CobbleSynergy 0.2.0 — 친구용 설치 (CobbleLeague 0.7.1 타입 시너지 애드온)
+CobbleSynergy 0.2.1 — 친구용 설치 (CobbleLeague 0.7.1 ~ 0.7.3 타입 시너지 애드온)
 
 CobbleLeague 던전에서 영입한 임시 파티의 타입 조합에 따라 TFT처럼 시너지가 켜집니다.
 CobbleLeague 자체는 바꾸지 않는 애드온입니다.
 
 설치
-1. CobbleLeague 친구용 설치(0.7.1)를 먼저 끝냅니다.
+1. CobbleLeague 친구용 설치(0.7.1 ~ 0.7.3, 서버와 같은 버전)를 먼저 끝냅니다.
 2. 마인크래프트를 완전히 종료하고 받은 ZIP 전체를 압축 해제합니다.
 3. 설치.bat 실행 → COBBLEVERSE 1.7.42 프로필 선택.
 4. 서버(방장 월드)에도 같은 CobbleSynergy jar가 있어야 시너지가 적용됩니다.
    서버는 payload 폴더의 jar를 서버 mods 폴더에 넣으면 됩니다.
 INSTALL.bat는 설치.bat와 같습니다. 되돌리기는 게임 종료 후 되돌리기.bat 또는 RESTORE.bat.
-이전 파일은 프로필/cobblesynergy-installer-backups에 보관됩니다.
+이전 CobbleSynergy 파일은 자동으로 빼서 프로필/cobblesynergy-installer-backups에 보관합니다 (mods에 CobbleSynergy는 항상 하나만).
 
 화면
 U: 시너지 도감 (18개 타입 전체, 단계별 효과)
@@ -79,8 +79,8 @@ config/cobblesynergy/state.json : 시너지 켜기·끄기 상태
 
 참고
 CobbleLeague 0.7.1에서는 포켓몬 내보내기·회수 연출이 가끔 끝나지 않아 전투가 멈출 수 있습니다.
-CobbleSynergy는 리그 전투에서 이런 연출이 6초 넘게 끝나지 않으면 마무리해 줍니다 (CobbleLeague 0.7.2의 복구와 같은 방식).
+CobbleLeague 0.7.1을 쓸 때만, CobbleSynergy가 리그 전투에서 이런 연출이 6초 넘게 끝나지 않으면 마무리해 줍니다 (CobbleLeague 0.7.2의 복구와 같은 방식).
 
 지원 환경
-Windows / Minecraft 1.21.1 / Fabric / Cobblemon 1.7.3 / COBBLEVERSE 1.7.42 / CobbleLeague 0.7.1.
+Windows / Minecraft 1.21.1 / Fabric / Cobblemon 1.7.3 / COBBLEVERSE 1.7.42 / CobbleLeague 0.7.1 ~ 0.7.3 (jar 하나로 모두 지원).
 이 ZIP에는 CobbleSynergy 한 개만 들어 있습니다. 다른 모드와 월드는 유지합니다.

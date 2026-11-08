@@ -24,9 +24,9 @@ def rep(a, b):
 rep("    $teams = @($Mods | Where-Object { $_.Meta -and $_.Meta.id -eq 'cobblemon_quick_teams' })\n",
     "    $league = @($Mods | Where-Object { $_.Meta -and $_.Meta.id -eq 'cobbleleague' })\n")
 rep("    if ($teams.Count -ne 1 -or $teams[0].Meta.version -ne '1.5.5') { throw '등록 덱 기능은 Quick Teams 1.5.5 기준입니다. 해당 모드가 들어 있는 COBBLEVERSE 1.7.42 프로필을 선택해 주세요.' }",
-    "    if ($league.Count -ne 1 -or $league[0].Meta.version -ne '0.7.1') { throw 'CobbleSynergy는 CobbleLeague 0.7.1 애드온입니다. CobbleLeague 친구용 설치(0.7.1)를 먼저 설치한 프로필을 선택해 주세요.' }")
+    "    if ($league.Count -ne 1 -or @('0.7.1','0.7.2','0.7.3') -notcontains $league[0].Meta.version) { throw 'CobbleSynergy는 CobbleLeague 0.7.1 ~ 0.7.3 애드온입니다. CobbleLeague 친구용 설치를 먼저 설치한 프로필을 선택해 주세요.' }")
 rep("Write-Host 'CobbleLeague 0.7.1 · 친구 PC용 설치' -ForegroundColor Cyan",
-    "Write-Host 'CobbleSynergy %s · 친구 PC용 설치 (CobbleLeague 0.7.1 타입 시너지 애드온)' -ForegroundColor Cyan" % version)
+    "Write-Host 'CobbleSynergy %s · 친구 PC용 설치 (CobbleLeague 0.7.1 ~ 0.7.3 타입 시너지 애드온)' -ForegroundColor Cyan" % version)
 rep("'cobbleleague-client-install.json'", "'cobblesynergy-client-install.json'")
 rep("        $current = @($mods | Where-Object { $_.Meta -and $_.Meta.id -eq 'cobbleleague' })",
     "        $current = @($mods | Where-Object { $_.Meta -and $_.Meta.id -eq 'cobblesynergy' })")
@@ -51,7 +51,7 @@ for target, action in [("설치.bat", "Install"), ("INSTALL.bat", "Install"), ("
     io.open(os.path.join(out, target), "w", encoding="ascii", newline="\r\n").write(bat)
 
 pkg = ('{\n  "name": "CobbleSynergy friends installer",\n  "version": "%s",\n  "clientVersion": "%s",\n'
-       '  "requiresCobbleLeague": "0.7.1",\n  "payload": "payload/%s",\n  "sha256": "%s"\n}\n') % (version, version, jar_name, sha)
+       '  "requiresCobbleLeague": "0.7.1 ~ 0.7.3",\n  "payload": "payload/%s",\n  "sha256": "%s"\n}\n') % (version, version, jar_name, sha)
 io.open(os.path.join(out, "package.json"), "w", encoding="utf-8", newline="\r\n").write(pkg)
 guide = io.open(os.path.join(root, "tools", "사용방법.txt"), encoding="utf-8-sig").read().replace("\r\n", "\n")
 io.open(os.path.join(out, "사용방법.txt"), "w", encoding="utf-8-sig", newline="\r\n").write(guide)
