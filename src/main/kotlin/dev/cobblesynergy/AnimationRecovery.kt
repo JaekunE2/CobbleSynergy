@@ -27,12 +27,9 @@ object AnimationRecovery {
      * 테스트 빌드: 모든 전투. 배포 빌드: CobbleLeague 0.7.1 (자체 복구가 없는 버전)일 때 리그 차원 전투만.
      * CobbleLeague 0.7.2 이상은 같은 복구를 직접 하므로 배포 빌드에서는 아무것도 하지 않는다.
      */
-    private val releaseOn: Boolean by lazy {
-        net.fabricmc.loader.api.FabricLoader.getInstance().getModContainer("cobbleleague")
-            .map { it.metadata.version.friendlyString.startsWith("0.7.1") }.orElse(false)
-    }
-    private fun watched(world: ServerLevel?): Boolean =
-        TestMode.enabled || (releaseOn && world?.dimension()?.location()?.toString() == "cobbleleague:league")
+    // 0.7.2 이상은 CobbleLeague 가 직접 복구하므로 테스트 빌드에서도 끈다 (두 복구가 겹치지 않게)
+    private fun watched(world: ServerLevel?): Boolean = LeagueCompat.needsAnimationRecovery &&
+        (TestMode.enabled || world?.dimension()?.location()?.toString() == "cobbleleague:league")
 
     @JvmStatic
     fun watchSendOut(mon: Pokemon, world: ServerLevel, pos: Vec3, id: UUID?, illusion: IllusionEffect?,

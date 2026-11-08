@@ -120,6 +120,9 @@ class CobbleSynergy : ModInitializer {
                 val n = com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "count")
                 ctx.source.sendSystemMessage(Component.literal(DungeonBot.spawn(ctx.source.server, ctx.source.player, n)))
                 Command.SINGLE_SUCCESS
+            }).then(Commands.literal("add").executes { ctx ->
+                ctx.source.sendSystemMessage(Component.literal(DungeonBot.addOne(ctx.source.server, ctx.source.player)))
+                Command.SINGLE_SUCCESS
             }).then(Commands.literal("stop").executes { ctx ->
                 ctx.source.sendSystemMessage(Component.literal(DungeonBot.remove(ctx.source.server)))
                 Command.SINGLE_SUCCESS
@@ -279,7 +282,7 @@ class CobbleSynergy : ModInitializer {
 
         if (cfg.applyInBattle != false) {
             val cap = JsonObject().apply {
-                addProperty("taken", cfg.minDamageTaken ?: 0.85)
+                addProperty("taken", cfg.minDamageTaken ?: 0.80)
                 addProperty("heal", cfg.maxHealPerTurn ?: 0.125)
                 addProperty("drain", cfg.maxDrain ?: 0.35)
             }

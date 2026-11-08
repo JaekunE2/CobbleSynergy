@@ -44,7 +44,6 @@ import java.util.UUID
 object DungeonBot {
     const val NAME = "SynergyBot"
     private fun uuidOf(name: String): UUID = UUID.nameUUIDFromBytes("OfflinePlayer:$name".toByteArray())
-    private const val PROTOCOL = 9 // CobbleLeague 0.7.1 클라이언트 프로토콜
     const val MAX_BOTS = 7 // 로비 정원 8명 - 본인
 
     private val bots = LinkedHashMap<UUID, ServerPlayer>()
@@ -112,7 +111,7 @@ object DungeonBot {
                 .onFailure { TestLog.log("bot", "스타터 처리 실패: $it") }
             bots[id] = player
             pilots.remove(id)
-            request(player, "hello") { addProperty("protocol", PROTOCOL) }
+            request(player, "hello") { addProperty("protocol", LeagueCompat.protocol) }
             TestLog.log("bot", "가상 플레이어 접속 $name uuid=$id")
             added++
         }
@@ -186,7 +185,10 @@ object DungeonBot {
             val queue = call(field(service, "lobbyQueue") ?: return, "members") as? List<*> ?: return
             if (p.uuid !in queue) { act(p, pilot, now, "lobby_join") ; return }
             val ready = call(field(service, "lobbyQueue")!!, "isReady", p.uuid) as? Boolean ?: false
-            if (!ready) act(p, pilot, now, "lobby_ready") { addProperty("ready", true) }
+            // 실제 플레이어가 로비에 있고 모두 대기 완료한 뒤에만 대기 완료 (봇끼리 먼저 시작하지 않게)
+            val humans = queue.filterIsInstance<UUID>().filter { it !in bots && it !in autoPlayers }
+            val humansReady = humans.isNotEmpty() && humans.all { call(field(service, "lobbyQueue")!!, "isReady", it) as? Boolean ?: false }
+            if (!ready && humansReady) act(p, pilot, now, "lobby_ready") { addProperty("ready", true) }
             return
         }
         pilot.hadRun = true
@@ -221,11 +223,21 @@ object DungeonBot {
             }
             "PREPARATION" -> if (!prep.confirmed) {
                 // 돈 사용 2: 도구가 없는 포켓몬에게 살 수 있는 가장 비싼 장비를 하나씩 산다. 살 것이 없으면 바로 준비 완료.
-                if (!shop(p, pilot, run, prep, now)) act(p, pilot, now, "ready") { addProperty("revision", prep.revision) }
+                if (!shop(p, pilot, run, prep, now) && humansPrepared(service)) act(p, pilot, now, "ready") { addProperty("revision", prep.revision) }
             }
             "REWARDS" -> {
                 val readySet = call(game!!, "getRewardReady") as? Set<*> ?: return
-                if (p.uuid !in readySet) act(p, pilot, now, "reward_done")
+                if (p.uuid in readySet) return
+                // CobbleLeague 0.7.3: 관장전 승리 보상은 하나를 먼저 골라야 확인 완료할 수 있다
+                val choice = field(run, "gymReward")?.let { field(it, "choice") }
+                if (choice != null && call(choice, "getSelected") == null) {
+                    @Suppress("UNCHECKED_CAST")
+                    val options = call(choice, "getOptions") as? List<Enum<*>> ?: emptyList()
+                    val prize = options.firstOrNull { it.name == "MONEY" } ?: options.firstOrNull() ?: return
+                    act(p, pilot, now, "gym_reward_choose") { addProperty("token", call(choice, "getToken").toString()); addProperty("prize", prize.name) }
+                    return
+                }
+                act(p, pilot, now, "reward_done")
             }
         }
     }
@@ -370,11 +382,15 @@ object DungeonBot {
 
     private fun who(p: ServerPlayer) = if (p.uuid in bots) p.scoreboardName else "자동 조작 ${p.scoreboardName}"
 
+    /** CobbleLeague 0.7.3 의 배틀 소모품 표시 (0.7.1 에는 없다) */
+    private fun consumable(product: Any): Boolean =
+        runCatching { product.javaClass.getMethod("getConsumable").invoke(product) as Boolean }.getOrDefault(false)
+
     /** 장비 하나를 산다. 산 것이 있으면 true */
     private fun shop(p: ServerPlayer, pilot: Pilot, run: Any, prep: DraftPreparation, now: Int): Boolean {
         val party = (call(run, "getParty") as PlayerPartyStore).toList()
         val holder = party.firstOrNull { it.heldItem().isEmpty } ?: return false
-        val product = DungeonShop.products.filter { it.id !in CONSUMABLE && it.price <= prep.money }
+        val product = DungeonShop.products.filter { it.id !in CONSUMABLE && !consumable(it) && it.price <= prep.money }
             .maxByOrNull { it.price * 10 + (0..9).random() } ?: return false
         val key = "${prep.revision}:${holder.uuid}"
         if (pilot.boughtFor == key) return false // 같은 상태에서 이미 시도함 (거절되면 준비 완료로 넘어간다)
@@ -391,6 +407,18 @@ object DungeonBot {
         pilot.lastAction = now
         request(p, action, body)
     }
+
+    /** 준비 단계: 던전에 있는 실제 플레이어(자동 조작 제외)가 모두 준비 완료했는지 */
+    private fun humansPrepared(service: Any): Boolean {
+        val runs = field(service, "runs") as? Map<*, *> ?: return true
+        return runs.filter { (id, _) -> id is UUID && id !in bots && id !in autoPlayers }.values.all { run ->
+            runCatching { (call(run!!, "getPreparation") as DraftPreparation).confirmed }.getOrDefault(true)
+        }
+    }
+
+    /** 로비의 [AI 트레이너 추가] 버튼, /synergy bot add : 가상 플레이어 1명 추가 */
+    fun addOne(server: MinecraftServer, near: ServerPlayer?): String =
+        if (bots.size >= MAX_BOTS) "가상 플레이어는 최대 ${MAX_BOTS}명입니다." else spawn(server, near, bots.size + 1)
 
     private fun runOf(service: Any, id: UUID): Any? = (field(service, "runs") as? Map<*, *>)?.get(id)
 
