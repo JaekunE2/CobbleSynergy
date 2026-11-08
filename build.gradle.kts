@@ -27,7 +27,7 @@ dependencies {
     modImplementation("maven.modrinth:cobblemon:kF7CvxTo")
 
     // CobbleLeague 는 컴파일할 때만 참조한다. 실제 게임에서는 설치된 jar 를 사용한다.
-    modCompileOnly(files((findProperty("cobbleleague_jar") as String?) ?: "libs/cobbleleague-0.7.6.jar"))
+    modCompileOnly(files((findProperty("cobbleleague_jar") as String?) ?: "libs/cobbleleague-0.7.7.jar"))
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.2.20")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
