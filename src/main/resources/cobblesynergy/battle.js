@@ -227,6 +227,17 @@
       if (n) return pr + n;
     });
 
+    /* Applies only to attacks aimed at the protected side. Never changes guaranteed hits or OHKO rules. */
+    B.onEvent('Accuracy', B.format, function (accuracy, target, source, move) {
+      if (typeof accuracy !== 'number' || !target || !source || source.side === target.side || !move || move.ohko || move.accuracy === true) return;
+      var c = S(target); if (!c || !c.accuracyshield) return;
+      var reduction = 0;
+      c.accuracyshield.forEach(function(e) {
+        if (B.turn <= e.until) reduction = Math.max(reduction, Math.min(0.10, Math.max(0,e.m || 0)));
+      });
+      if (reduction) return accuracy * (1-reduction);
+    });
+
     B.onEvent('ModifyDamage', B.format, function (d, src, tgt, move) {
       var m = 1;
       var names = [];
@@ -329,7 +340,7 @@
 
   var all = __SIDES__;
   var ids = [];
-  for (var k in all) { B.__cs[k] = all[k]; ids.push(k); }
+  for (var k in all) { B.__cs[k] = all[k]; (all[k].accuracyshield || []).forEach(function(e) { e.until=Math.max(B.turn,1)+(e.d || 0)-1; }); ids.push(k); }
   if (ids.length > 1 && B.random(2) === 1) ids.reverse();
   var sideOf = function (id) { return B.sides.find(function (x) { return x.id === id; }); };
   var FIELD = { weather: 1, terrain: 1, room: 1 };

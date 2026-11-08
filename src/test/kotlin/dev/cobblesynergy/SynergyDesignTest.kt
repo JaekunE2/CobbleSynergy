@@ -19,7 +19,7 @@ class SynergyDesignTest {
     private val known = setOf(
         "sidecond", "room", "terrain", "weather", "foevolatile", "entry", "endure", "priority", "onhit",
         "heal", "drain", "charm", "grudge", "ppgrudge", "odds", "oddsbuy", "reroll", "laststand",
-        "power", "stat", "taken", "crit", "execute", "vsstatus", "first",
+        "power", "stat", "taken", "crit", "execute", "vsstatus", "first", "accuracyshield",
     )
     private val directDamage = setOf("power", "stat", "taken", "crit", "execute", "vsstatus", "first")
 
@@ -81,7 +81,7 @@ class SynergyDesignTest {
         assertEquals("최후의 드래곤", dragon.name)
         assertTrue(dragon.tiers.all { t -> t.effectList.all { it.kind == "laststand" && (it.boosts?.get("spe") ?: 0) >= 1 } })
         // 페어리 4: 매 라운드 리롤 +1
-        assertTrue(def("fairy").tiers.first { it.count == 4 }.effectList.any { it.kind == "reroll" && it.v == 1.0 })
+        assertTrue(def("fairy").tiers.all{t->t.effectList.none{it.kind in setOf("odds","oddsbuy","reroll")}})
         assertTrue(ice[1].effectList.any { it.id == "snow" })
         assertTrue(ice[2].effectList.any { it.id == "auroraveil" && it.turns == 3 })
         // 격투 3 버티기 하나
@@ -91,9 +91,10 @@ class SynergyDesignTest {
         // 페어리 2 추가 구매 / 4 리롤 +1 / 6 전체 자동 강화
         val fairy = def("fairy").tiers
         assertEquals(listOf(2, 4, 6), fairy.map { it.count })
-        assertTrue(fairy[0].effectList.any { it.kind == "oddsbuy" })
-        assertTrue(fairy[1].effectList.any { it.kind == "reroll" })
-        assertTrue(fairy[2].effectList.any { it.kind == "odds" && it.id == "all" })
+        assertEquals(listOf(0.05,0.08,0.10),fairy.map{it.effectList.first{e->e.kind=="accuracyshield"}.v})
+        assertEquals(listOf(3,3,4),fairy.map{it.effectList.first{e->e.kind=="accuracyshield"}.turns})
+        assertTrue(fairy[1].effectList.any{it.id=="mistyterrain"&&it.turns==3})
+        assertTrue(fairy[2].effectList.any{it.id=="mistyterrain"&&it.turns==5})
     }
 
     @Test

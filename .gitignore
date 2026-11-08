@@ -9,3 +9,5 @@ out/
 logs/
 *.log
 dist/
+
+libs/*.jar

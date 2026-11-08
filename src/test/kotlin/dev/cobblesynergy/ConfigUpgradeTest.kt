@@ -6,6 +6,17 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 class ConfigUpgradeTest {
+    @Test fun `version3 migration changes fairy only and keeps edited other types and caps`() {
+        val dir=Files.createTempDirectory("cs-v3")
+        val old=SynergyFile(designVersion=3,minDamageTaken=0.91,synergies=Defaults.ALL.map{if(it.type=="fire")it.copy(name="custom fire")else it})
+        Files.writeString(dir.resolve("synergies.json"),com.google.gson.Gson().toJson(old))
+        SynergyConfig.load(dir)
+        assertEquals("custom fire",SynergyConfig.current.defs.first{it.type=="fire"}.name)
+        assertEquals(0.91,SynergyConfig.current.minDamageTaken)
+        assertTrue(SynergyConfig.current.defs.first{it.type=="fairy"}.tiers.all{it.effectList.any{e->e.kind=="accuracyshield"}})
+        assertTrue(Files.exists(dir.resolve("synergies.json.v3.bak")))
+    }
+
     @Test
     fun `이전 설계 파일(designVersion 없음)은 백업하고 새 기본값으로 바꾼다`() {
         val dir = Files.createTempDirectory("cs-config")

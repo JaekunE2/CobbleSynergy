@@ -110,7 +110,7 @@ data class SynergyFile(
 }
 
 object Defaults {
-    const val DESIGN = 3
+    const val DESIGN = 4
 
     private fun power(mult: Double, target: String = "member", nonStab: Boolean = false) =
         Effect(kind = "power", value = mult, target = target, nonStab = nonStab)
@@ -210,10 +210,10 @@ object Defaults {
             Tier(2, effects = listOf(Effect("taken", value = 0.92))),
             Tier(4, effects = listOf(Effect("taken", value = 0.85))),
         )),
-        SynergyDef("fairy", "요정의 축복", listOf(
-            Tier(2, effects = listOf(oddsBuy(1))),
-            Tier(4, effects = listOf(oddsBuy(1), reroll(1))),
-            Tier(6, effects = listOf(oddsBuy(1), reroll(1), odds("all"))),
+        SynergyDef("fairy", "요정의 장막", listOf(
+            Tier(2, effects = listOf(Effect(kind="accuracyshield",value=0.05,duration=3,target="team"))),
+            Tier(4, effects = listOf(Effect(kind="accuracyshield",value=0.08,duration=3,target="team"),terrain("mistyterrain",3))),
+            Tier(6, effects = listOf(Effect(kind="accuracyshield",value=0.10,duration=4,target="team"),terrain("mistyterrain",5))),
         )),
     )
 }
@@ -237,9 +237,11 @@ object SynergyConfig {
             val fileVersion = runCatching { com.google.gson.JsonParser.parseString(text).asJsonObject.get("designVersion")?.asInt }.getOrNull() ?: 1
             if (parsed != null && fileVersion != Defaults.DESIGN) {
                 Files.move(file, dir.resolve("synergies.json.v$fileVersion.bak"), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
-                Files.writeString(file, gson.toJson(SynergyFile()))
+                val upgraded=if(fileVersion==3)parsed.copy(designVersion=Defaults.DESIGN,
+                    synergies=parsed.defs.filter{it.type!="fairy"}+Defaults.ALL.first{it.type=="fairy"}) else SynergyFile()
+                Files.writeString(file,gson.toJson(upgraded))
                 CobbleSynergy.LOGGER.info("CobbleSynergy: 시너지 설계가 바뀌어 synergies.json 을 새 기본값으로 교체했습니다 (이전 파일은 .bak)")
-                parsed = SynergyFile()
+                parsed = upgraded
             }
             current = parsed ?: SynergyFile()
             CobbleSynergy.LOGGER.info("CobbleSynergy: {} synergies loaded", current.defs.size)

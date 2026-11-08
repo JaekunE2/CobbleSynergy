@@ -83,7 +83,7 @@ class CobbleSynergy : ModInitializer {
 
         CobblemonEvents.BATTLE_STARTED_POST.subscribe(Priority.NORMAL) { event ->
             val battle = event.battle
-            server?.let { s -> runCatching { Spectate.onBattleStart(s, battle) } }
+            pending += (tick+1) to { server?.let { s -> runCatching { Spectate.onBattleStart(s,battle) } };Unit }
             // 자동 테스트의 비교용 전투(noInject)는 주입하지 않는다. 나머지는 실제 게임과 같은 지연.
             if (battle.actors.none { it.uuid in TestBattle.noInject }) pending += (tick + INJECT_DELAY) to { inject(battle) }
         }

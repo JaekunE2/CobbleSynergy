@@ -67,6 +67,7 @@ object SynergyEngine {
                 }
                 "$who $what 위력 +${pct(effect.v)}%"
             }
+            "accuracyshield" -> "우리 진영을 향한 상대 기술 명중률 ×${"%.2f".format(1-effect.v)} (${effect.turns}턴, 필중·일격기 제외)"
             "stat" -> {
                 val stats = effect.stat.orEmpty().split(',').joinToString("·") { STAT_KO[it.trim()] ?: it }
                 "$who $stats +${pct(effect.v)}%"
@@ -208,6 +209,7 @@ object SynergyEngine {
                         val copy = e.deepCopy(); copy.addProperty("s", s); copy.addProperty("m", effect.v)
                         list("stat").add(copy)
                     }
+                    "accuracyshield" -> {e.addProperty("m",effect.v.coerceIn(0.0,0.10));e.addProperty("d",effect.turns)}
                     "heal", "drain", "grudge" -> e.addProperty("f", effect.v)
                     "onhit" -> {
                         effect.moveType?.let { e.addProperty("mt", showdownType(it)) }

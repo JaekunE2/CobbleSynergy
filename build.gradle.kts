@@ -1,7 +1,7 @@
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 plugins {
-    id("fabric-loom") version "1.11-SNAPSHOT"
+    id("fabric-loom") version "1.11.8"
     kotlin("jvm") version "2.2.20"
 }
 
@@ -13,6 +13,7 @@ base { archivesName.set("cobblesynergy") }
 
 repositories {
     mavenCentral()
+    maven("https://api.modrinth.com/maven")
     maven("https://maven.impactdev.net/repository/development/") { name = "Cobblemon" }
 }
 
@@ -23,10 +24,10 @@ dependencies {
     modImplementation("net.fabricmc:fabric-loader:${property("loader_version")}")
     modImplementation("net.fabricmc.fabric-api:fabric-api:${property("fabric_api_version")}")
     modImplementation("net.fabricmc:fabric-language-kotlin:${property("fabric_kotlin_version")}")
-    modImplementation("com.cobblemon:fabric:${property("cobblemon_version")}")
+    modImplementation("maven.modrinth:cobblemon:kF7CvxTo")
 
     // CobbleLeague 는 컴파일할 때만 참조한다. 실제 게임에서는 설치된 jar 를 사용한다.
-    modCompileOnly(files("libs/cobbleleague-0.7.1.jar"))
+    modCompileOnly(files((findProperty("cobbleleague_jar") as String?) ?: "libs/cobbleleague-0.7.4.jar"))
 
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.2.20")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -51,3 +52,5 @@ tasks.processResources {
     filesMatching("fabric.mod.json") { expand("version" to project.version) }
     filesMatching("cobblesynergy/build.properties") { expand("test" to testBuild.toString()) }
 }
+
+tasks.withType<Jar>().configureEach { isPreserveFileTimestamps = false; isReproducibleFileOrder = true }
