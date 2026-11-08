@@ -156,6 +156,25 @@ object DungeonBot {
         }
         for (id in autoPlayers.toList()) if (id !in bots) server.playerList.getPlayer(id)?.let { drive(it, now) }
         if (bots.isNotEmpty() && now % 10 == 0) runCatching { userDuelFirst() }
+        if (bots.isNotEmpty()) runCatching { fastForward(server) }
+    }
+
+    /**
+     * 사람이 참가하지도, 관전하지도 않는 전투(봇끼리, 봇과 관장 NPC)는 Cobblemon 의 연출 대기(실제 시간 몇 초씩)를 건너뛴다.
+     * 포켓몬을 내보내고 들이는 동작(UntilDispatch)은 그대로 기다린다. 사람이 관전을 시작하면 원래 속도로 돌아간다.
+     */
+    private fun fastForward(server: MinecraftServer) {
+        val battles = bots.values.mapNotNull { BattleRegistry.getBattleByParticipatingPlayer(it) }.distinctBy { it.battleId }
+        for (b in battles) {
+            if (b.ended) continue
+            if (b.players.any { it.uuid !in bots }) continue
+            if (b.spectators.any { it !in bots && server.playerList.getPlayer(it) != null }) continue
+            repeat(8) {
+                if (b.dispatchResult !is com.cobblemon.mod.common.battles.dispatch.WaitDispatch) return@repeat
+                b.dispatchResult = com.cobblemon.mod.common.battles.dispatch.GO
+                b.tick()
+            }
+        }
     }
 
     /**
@@ -348,12 +367,17 @@ object DungeonBot {
         pilot.boughtFor = key
         val old = mon.moveSet[slot]?.template?.displayName?.string ?: "빈 칸"
         TestLog.log("bot", "${p.scoreboardName} 기술 구매: ${mon.species.translatedName.string} $old → ${move.displayName.string} (이득 ${"%.0f".format(gain)}, ${if (prep.freeLessons > 0) "무료 학습" else "${DungeonShop.TM_PRICE}원"})")
-        say(p.server, "[${who(p)}] 기술 학습(${BotBrain.role(mon).ko}): ${mon.species.translatedName.string} $old → ${move.displayName.string}")
+        val free = prep.freeLessons > 0
         act(p, pilot, now, "buy") {
             addProperty("pokemon", mon.uuid.toString()); addProperty("operation", "tm"); addProperty("move", move.name)
             addProperty("slot", slot); addProperty("revision", prep.revision)
         }
-        pilot.wishes.remove(mon.uuid)
+        // 서버가 받아들였는지 확인 (돈·무료 학습이 실제로 있어야 배운다)
+        if (mon.moveSet.getMoves().any { it.name == move.name }) {
+            say(p.server, "[${who(p)}] 기술 학습(${BotBrain.role(mon).ko}): ${mon.species.translatedName.string} $old → ${move.displayName.string} · " +
+                (if (free) "무료 학습" else "${DungeonShop.TM_PRICE}원") + " · 남은 돈 ${prep.money}원")
+            pilot.wishes.remove(mon.uuid)
+        } else TestLog.log("bot", "${p.scoreboardName} 기술 구매 거절됨 (돈 ${prep.money}, 무료 ${prep.freeLessons})")
         return true
     }
 
@@ -460,8 +484,11 @@ object DungeonBot {
         }.ifEmpty { "없음" }
     }.getOrDefault("?")
 
-    private fun say(server: MinecraftServer, text: String) =
+    /** AI 트레이너 진행 상황 채팅 (영입·구매·단계). 테스트 빌드에서만 보낸다. 배포판(GitHub)에는 나오지 않는다. */
+    private fun say(server: MinecraftServer, text: String) {
+        if (!TestMode.enabled) return
         server.playerList.players.filter { it.uuid !in bots }.forEach { it.sendSystemMessage(Component.literal(text).withStyle(ChatFormatting.DARK_AQUA)) }
+    }
 
     private fun request(p: ServerPlayer, action: String, body: JsonObject.() -> Unit = {}) {
         val json = JsonObject().apply { addProperty("action", action); body() }
@@ -530,11 +557,12 @@ object DungeonBot {
         val all = offers(run, party)
         all.firstOrNull { it.owned }?.let { o ->
             pilot.boughtFor = key
-            say(p.server, "[${who(p)}] 보관 도구 장착: ${o.mon.species.translatedName.string} ← ${itemName(o.item)}")
             act(p, pilot, now, "buy") {
                 addProperty("pokemon", o.mon.uuid.toString()); addProperty("product", o.item)
                 addProperty("operation", "owned"); addProperty("revision", prep.revision)
             }
+            if (itemKey(o.mon) == o.item) say(p.server, "[${who(p)}] 보관 도구 장착: ${o.mon.species.translatedName.string} ← ${itemName(o.item)} · 무료")
+            else TestLog.log("bot", "${p.scoreboardName} 보관 도구 장착 거절됨: ${o.item}")
             return true
         }
         val top = all.firstOrNull()
@@ -547,22 +575,25 @@ object DungeonBot {
                 val label = "${top.mon.species.translatedName.string}의 ${itemName(top.item)} (${top.price}원)"
                 if (pilot.savingFor != label) {
                     pilot.savingFor = label
-                    say(p.server, "[${who(p)}] 돈 모으는 중: $label · 지금 ${prep.money}원")
+                    say(p.server, "[${who(p)}] 돈 모으는 중: $label · 지금 ${prep.money}원 (모자란 ${top.price - prep.money}원은 다음 라운드부터)")
                     TestLog.log("bot", "${p.scoreboardName} 돈 모으기: $label 이득 ${"%.0f".format(top.gain)}")
                 }
                 return false
             }
         }
-        val pick = affordable.firstOrNull() ?: return false
+        val pick = affordable.firstOrNull { it.price <= prep.money } ?: return false // 실제로 가진 돈 안에서만
         pilot.savingFor = null
         pilot.boughtFor = key
         val old = if (pick.mon.heldItem().isEmpty) "없음" else itemName(itemKey(pick.mon))
         TestLog.log("bot", "${p.scoreboardName} 구매: ${pick.item}(${pick.price}) → ${pick.mon.species.translatedName.string} (${BotBrain.role(pick.mon).ko}, 이득 ${"%.0f".format(pick.gain)}) · 돈 ${prep.money}")
-        say(p.server, "[${who(p)}] 도구 구매: ${pick.mon.species.translatedName.string}(${BotBrain.role(pick.mon).ko}) $old → ${itemName(pick.item)} · ${pick.price}원")
+        val before = prep.money
         act(p, pilot, now, "buy") {
             addProperty("pokemon", pick.mon.uuid.toString()); addProperty("product", pick.item)
             addProperty("operation", "buy"); addProperty("revision", prep.revision)
         }
+        if (prep.money == before - pick.price && itemKey(pick.mon) == pick.item)
+            say(p.server, "[${who(p)}] 도구 구매: ${pick.mon.species.translatedName.string}(${BotBrain.role(pick.mon).ko}) $old → ${itemName(pick.item)} · ${pick.price}원 · 남은 돈 ${prep.money}원")
+        else TestLog.log("bot", "${p.scoreboardName} 도구 구매 거절됨: ${pick.item} 돈 $before→${prep.money}")
         return true
     }
 
