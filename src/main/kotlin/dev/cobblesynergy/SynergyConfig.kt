@@ -98,8 +98,8 @@ data class SynergyFile(
     val comment: String? = "숫자를 바꾸고 서버를 재시작하면 적용됩니다. 설명 문구는 자동 생성됩니다.",
     /** 전투에 적용할지 (false 면 표시만 한다) */
     val applyInBattle: Boolean? = true,
-    /** 한 포켓몬이 받는 피해 감소 합계의 하한 (0.85 = 최대 15% 감소) */
-    val minDamageTaken: Double? = 0.85,
+    /** 한 포켓몬이 받는 피해 감소 합계의 하한 (0.80 = 최대 20% 감소) */
+    val minDamageTaken: Double? = 0.80,
     /** 한 포켓몬의 턴당 회복 합계 상한 (최대 HP 비율) */
     val maxHealPerTurn: Double? = 0.125,
     /** 흡수 합계 상한 */
@@ -110,7 +110,7 @@ data class SynergyFile(
 }
 
 object Defaults {
-    const val DESIGN = 3
+    const val DESIGN = 4
 
     private fun power(mult: Double, target: String = "member", nonStab: Boolean = false) =
         Effect(kind = "power", value = mult, target = target, nonStab = nonStab)
@@ -141,8 +141,8 @@ object Defaults {
      */
     val ALL: List<SynergyDef> = listOf(
         SynergyDef("normal", "만능", listOf(
-            Tier(3, effects = listOf(power(1.10, target = "team", nonStab = true))),
-            Tier(6, effects = listOf(power(1.20, target = "team", nonStab = true))),
+            Tier(3, effects = listOf(power(1.15, target = "team", nonStab = true))),
+            Tier(6, effects = listOf(power(1.30, target = "team", nonStab = true))),
         )),
         SynergyDef("fire", "열기", listOf(
             Tier(3, effects = listOf(weather("sunnyday", 3), onHit("fire", 0.10, status = "brn"))),
@@ -207,8 +207,8 @@ object Defaults {
             Tier(4, effects = listOf(foeVolatile("taunt", 3), onHit("dark", 0.20, volatile = "flinch"))),
         )),
         SynergyDef("steel", "합금", listOf(
-            Tier(2, effects = listOf(Effect("taken", value = 0.92))),
-            Tier(4, effects = listOf(Effect("taken", value = 0.85))),
+            Tier(2, effects = listOf(Effect("taken", value = 0.88))),
+            Tier(4, effects = listOf(Effect("taken", value = 0.80))),
         )),
         SynergyDef("fairy", "요정의 축복", listOf(
             Tier(2, effects = listOf(oddsBuy(1))),

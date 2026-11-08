@@ -15,7 +15,7 @@ const { BattleStream, Dex, Teams } = sim;
 
 const sides = JSON.parse(fs.readFileSync(path.join(buildDir, 'synergy-sides.json'), 'utf8'));
 const script = fs.readFileSync(path.join(buildDir, 'battle-oneline.js'), 'utf8');
-const CAP = JSON.stringify({ taken: 0.85, heal: 0.125, drain: 0.35 });
+const CAP = JSON.stringify({ taken: 0.80, heal: 0.125, drain: 0.35 });
 
 const NAME = {
   reflect: 'Reflect', lightscreen: 'Light Screen', auroraveil: 'Aurora Veil', safeguard: 'Safeguard', tailwind: 'Tailwind',
@@ -251,24 +251,24 @@ for (const type of Object.keys(sides)) {
     return -1;
   };
   const events = (l) => l.filter(x => x.includes('cobblesynergy:')).map(x => JSON.parse(x.slice(x.indexOf('cobblesynergy:') + 14)));
-  // 강철 4: 상대의 몸통박치기로 받는 피해 -15%
+  // 강철 4: 상대의 몸통박치기로 받는 피해 -20%
   const steelT = () => team('Steel', 4, 50).map(m => mon(m.species, 50, ['splash']));
   const hitter = () => foeTeam(100, ['bodyslam']);
   const withS = run(steelT(), hitter(), sides.steel['4'], 2);
   const without = run(steelT(), hitter(), {}, 2);
   const a = firstLoss(withS, 'p1'), b = firstLoss(without, 'p1');
-  check('실전 피해: 강철4 받는 피해 -15%', a > 0 && b > 0 && Math.abs(a - Math.round(b * 0.85)) <= 1, `시너지 없음 ${b} → 있음 ${a} (기대 ${Math.round(b * 0.85)})`);
+  check('실전 피해: 강철4 받는 피해 -20%', a > 0 && b > 0 && Math.abs(a - Math.round(b * 0.80)) <= 1, `시너지 없음 ${b} → 있음 ${a} (기대 ${Math.round(b * 0.80)})`);
   const ev = events(withS).find(e => e.k === 'dmg');
-  check('실전 피해: 강철4 전투 로그 이벤트', !!ev && ev.m === 0.85, ev ? `before=${ev.before} m=${ev.m}` : '없음');
-  // 노말 6: 자속이 아닌 기술(10만볼트) 위력 +20%
+  check('실전 피해: 강철4 전투 로그 이벤트', !!ev && ev.m === 0.8, ev ? `before=${ev.before} m=${ev.m}` : '없음');
+  // 노말 6: 자속이 아닌 기술(10만볼트) 위력 +30%
   const normT = () => team('Normal', 6, 50).map(m => mon(m.species, 50, ['thunderbolt']));
   const tank = () => foeTeam(100, ['splash']);
   const w2 = run(normT(), tank(), sides.normal['6'], 2);
   const o2 = run(normT(), tank(), {}, 2);
   const c2 = firstLoss(w2, 'p2'), d2 = firstLoss(o2, 'p2');
-  check('실전 피해: 노말6 자속 아닌 기술 +20%', c2 > 0 && d2 > 0 && Math.abs(c2 / d2 - 1.2) < 0.05, `없음 ${d2} → 있음 ${c2} (×${(c2 / d2).toFixed(3)})`);
+  check('실전 피해: 노말6 자속 아닌 기술 +30%', c2 > 0 && d2 > 0 && Math.abs(c2 / d2 - 1.3) < 0.05, `없음 ${d2} → 있음 ${c2} (×${(c2 / d2).toFixed(3)})`);
   const pv = events(w2).find(e => e.k === 'power');
-  check('실전 피해: 노말6 위력 이벤트', !!pv && pv.m === 1.2 && pv.bp === 90, pv ? `bp=${pv.bp} m=${pv.m}` : '없음');
+  check('실전 피해: 노말6 위력 이벤트', !!pv && pv.m === 1.3 && pv.bp === 90, pv ? `bp=${pv.bp} m=${pv.m}` : '없음');
   // 노말 6 이라도 자속 기술(노말 기술)은 그대로
   const normS = () => team('Normal', 6, 50).map(m => mon(m.species, 50, ['bodyslam']));
   const w3 = run(normS(), tank(), sides.normal['6'], 2), o3 = run(normS(), tank(), {}, 2);

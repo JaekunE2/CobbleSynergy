@@ -77,7 +77,7 @@ class CobbleSynergy : ModInitializer {
         }
 
         ServerTickEvents.END_SERVER_TICK.register(::onTick)
-        ServerPlayConnectionEvents.DISCONNECT.register { handler, _ -> lastSent.remove(handler.player.uuid) }
+        ServerPlayConnectionEvents.DISCONNECT.register { handler, _ -> lastSent.remove(handler.player.uuid); Spectate.forget(handler.player.uuid) }
         ServerLifecycleEvents.SERVER_STOPPING.register { s -> if (DungeonBot.active) runCatching { DungeonBot.remove(s) } }
         ServerLifecycleEvents.SERVER_STOPPED.register { DungeonBot.stopped(); lastSent.clear(); pending.clear(); oddsRound.clear(); extraGranted.clear(); server = null }
 
@@ -91,7 +91,8 @@ class CobbleSynergy : ModInitializer {
             val battle = event.battle
             if (TestMode.enabled && battle.battleId in injected) TestBattle.summarizeEnd(battle)
             injected.remove(battle.battleId)
-            Spectate.onBattleEnd(battle)
+            val watchers = Spectate.onBattleEnd(battle)
+            if (watchers.isNotEmpty()) server?.let { s -> pending += (tick + 40) to { Spectate.sendBack(s, watchers) } }
         }
 
         CommandRegistrationCallback.EVENT.register { dispatcher, _, _ ->
@@ -119,6 +120,9 @@ class CobbleSynergy : ModInitializer {
             }.then(Commands.argument("count", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, DungeonBot.MAX_BOTS)).executes { ctx ->
                 val n = com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "count")
                 ctx.source.sendSystemMessage(Component.literal(DungeonBot.spawn(ctx.source.server, ctx.source.player, n)))
+                Command.SINGLE_SUCCESS
+            }).then(Commands.literal("add").executes { ctx ->
+                ctx.source.sendSystemMessage(Component.literal(DungeonBot.addOne(ctx.source.server, ctx.source.player)))
                 Command.SINGLE_SUCCESS
             }).then(Commands.literal("stop").executes { ctx ->
                 ctx.source.sendSystemMessage(Component.literal(DungeonBot.remove(ctx.source.server)))
@@ -279,7 +283,7 @@ class CobbleSynergy : ModInitializer {
 
         if (cfg.applyInBattle != false) {
             val cap = JsonObject().apply {
-                addProperty("taken", cfg.minDamageTaken ?: 0.85)
+                addProperty("taken", cfg.minDamageTaken ?: 0.80)
                 addProperty("heal", cfg.maxHealPerTurn ?: 0.125)
                 addProperty("drain", cfg.maxDrain ?: 0.35)
             }

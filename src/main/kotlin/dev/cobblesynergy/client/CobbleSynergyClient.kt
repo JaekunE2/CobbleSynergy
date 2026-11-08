@@ -73,6 +73,13 @@ class CobbleSynergyClient : ClientModInitializer {
                     .build()
                 Screens.getButtons(screen).add(toggle)
                 ScreenEvents.afterTick(screen).register { toggle.message = label() }
+                // 테스트 빌드 전용: 가상 플레이어(AI 트레이너)를 한 명씩 로비에 넣는다. 배포판에는 없다.
+                if (dev.cobblesynergy.TestMode.enabled) Screens.getButtons(screen).add(
+                    Button.builder(Component.literal("AI 트레이너 추가")) { client.player?.connection?.sendCommand("synergy bot add") }
+                        .bounds(px + pw - 12 - 92, py + 24, 92, 16)
+                        .tooltip(net.minecraft.client.gui.components.Tooltip.create(Component.literal(
+                            "가상 플레이어를 1명 로비에 넣습니다 (최대 7명). 영입·상점·전투는 자동이고, 대기 완료와 준비 완료는 내가 한 뒤에 합니다.")))
+                        .build())
                 return@register
             }
 
