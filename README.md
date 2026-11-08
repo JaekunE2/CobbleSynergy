@@ -1,6 +1,10 @@
-# CobbleSynergy 0.3.1
+# CobbleSynergy 0.3.2
 
-CobbleLeague 0.7.5 / Minecraft 1.21.1 / Cobblemon 1.7.3용 타입 시너지 애드온입니다. 던전 임시 파티의 타입을 계산하고 전투 효과와 HUD·U 도감을 제공합니다. 효과는 서버가 적용하며 화면 표시는 클라이언트 애드온을 사용합니다.
+CobbleLeague 0.7.6 / Minecraft 1.21.1 / Cobblemon 1.7.3용 타입 시너지 애드온입니다. 던전 임시 파티의 타입을 계산하고 전투 효과와 HUD·U 도감을 제공합니다. 효과는 서버가 적용하며 화면 표시는 클라이언트 애드온을 사용합니다.
+
+## 0.3.2 변경점
+
+CobbleLeague 0.7.6의 GitHub 자산 API 기반 전송 보완과 함께 배포하는 호환 메타데이터 갱신입니다. 시너지 실행 코드는 유지합니다.
 
 ## 0.3.1 변경점
 
@@ -43,7 +47,7 @@ U는 도감, F4의 시너지 버튼은 현황, F4 경기 관전은 관전 대상
 
 ## 빌드와 검증
 
-JDK 21과 Gradle이 필요합니다. CobbleLeague 0.7.5 배포 JAR을 `libs/cobbleleague-0.7.5.jar`에 두거나 `-Pcobbleleague_jar=절대경로`로 지정합니다. 기본값 `test_build=false`가 일반 배포이며, 테스트 빌드는 별도로 `-Ptest_build=true`를 지정합니다.
+JDK 21과 Gradle이 필요합니다. CobbleLeague 0.7.6 배포 JAR을 `libs/cobbleleague-0.7.6.jar`에 두거나 `-Pcobbleleague_jar=절대경로`로 지정합니다. 기본값 `test_build=false`가 일반 배포이며, 테스트 빌드는 별도로 `-Ptest_build=true`를 지정합니다.
 
 ```powershell
 gradle --no-daemon test build
