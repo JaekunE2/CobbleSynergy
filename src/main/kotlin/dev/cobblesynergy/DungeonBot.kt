@@ -32,7 +32,8 @@ import java.lang.reflect.Method
 import java.util.UUID
 
 /**
- * 테스트 빌드 전용: CobbleLeague 던전을 같이 플레이하는 가상 플레이어.
+ * AI 트레이너: CobbleLeague 던전을 같이 플레이하는 가상 플레이어. 운영자·싱글 방장이 로비 버튼이나 /synergy bot add 로 넣는다.
+ * (자동 입장과 자동 테스트는 테스트 빌드에서만)
  *
  *  - 실제 서버 플레이어로 접속시킨다(접속 목록에 들어가야 CobbleLeague 가 참가자로 인식한다).
  *    네트워크 연결은 없는 빈 연결이고, 보내는 패킷은 모두 버린다.
@@ -67,6 +68,9 @@ object DungeonBot {
         var stalls = 0
         var scheduled: ShowdownActionRequest? = null
         var hadRun = false
+        /** 기억한 기술: 포켓몬 uuid → (기술 이름, 바꿀 칸). 돈이 생기면 기술머신으로 산다. */
+        val wishes = HashMap<UUID, Pair<String, Int>>()
+        var rewardStep = ""
     }
     private val pilots = HashMap<UUID, Pilot>()
     val autoPlayers = HashSet<UUID>()
@@ -93,7 +97,6 @@ object DungeonBot {
 
     /** 가상 플레이어를 count 명까지 접속시킨다 (SynergyBot1, SynergyBot2 ...) */
     fun spawn(server: MinecraftServer, near: ServerPlayer?, count: Int = 1): String {
-        if (!TestMode.enabled) return "테스트 빌드에서만 쓸 수 있습니다."
         val want = count.coerceIn(1, MAX_BOTS)
         val level = near?.serverLevel() ?: server.overworld()
         var added = 0
@@ -222,7 +225,9 @@ object DungeonBot {
                 choose(service, p, pilot, run, state, prep, displays, choices, now)
             }
             "PREPARATION" -> if (!prep.confirmed) {
-                // 돈 사용 2: 도구가 없는 포켓몬에게 살 수 있는 가장 비싼 장비를 하나씩 산다. 살 것이 없으면 바로 준비 완료.
+                // 보상 포켓몬 → 기억한 기술 구매 → 장비 구매 순. 할 것이 없고 사람이 모두 준비 완료했으면 준비 완료.
+                if (rewards(service, p, pilot, run, prep, now)) return
+                if (lessons(service, p, pilot, run, prep, now)) return
                 if (!shop(p, pilot, run, prep, now) && humansPrepared(service)) act(p, pilot, now, "ready") { addProperty("revision", prep.revision) }
             }
             "REWARDS" -> {
@@ -233,10 +238,13 @@ object DungeonBot {
                 if (choice != null && call(choice, "getSelected") == null) {
                     @Suppress("UNCHECKED_CAST")
                     val options = call(choice, "getOptions") as? List<Enum<*>> ?: emptyList()
-                    val prize = options.firstOrNull { it.name == "MONEY" } ?: options.firstOrNull() ?: return
+                    // 강한 포켓몬을 얻는 보상을 먼저 고른다
+                    val order = listOf("LEGENDARY", "MYTHICAL", "EQUIPMENT", "LESSON", "MONEY", "CRYSTAL")
+                    val prize = options.minByOrNull { order.indexOf(it.name).let { i -> if (i < 0) 99 else i } } ?: return
                     act(p, pilot, now, "gym_reward_choose") { addProperty("token", call(choice, "getToken").toString()); addProperty("prize", prize.name) }
                     return
                 }
+                if (rewards(service, p, pilot, run, prep, now)) return
                 act(p, pilot, now, "reward_done")
             }
         }
@@ -244,37 +252,48 @@ object DungeonBot {
 
     // ------------------------------------------------------------------ 영입
 
+    /** 다음 상대의 임시 파티 (정해지지 않았으면 다른 참가자 전체). 약점 찌르기·기술 고르기의 기준. */
+    private fun threats(service: Any, self: UUID): List<Pokemon> {
+        val runs = field(service, "runs") as? Map<*, *> ?: return emptyList()
+        fun partyOf(id: Any?): List<Pokemon> = runCatching { (call(runs[id]!!, "getParty") as PlayerPartyStore).toList() }.getOrDefault(emptyList())
+        val game = field(service, "lobbyGame")
+        val duels = buildList {
+            game?.let { field(it, "current") }?.let(::add)
+            (game?.let { field(it, "duels") } as? Collection<*>)?.let(::addAll)
+        }.filterIsInstance<dev.cobbleleague.LeagueDuel>()
+        val next = duels.firstOrNull { it.first == self || it.second == self }?.let { if (it.first == self) it.second else it.first }
+        if (next != null && partyOf(next).isNotEmpty()) return partyOf(next)
+        return runs.keys.filter { it != self }.flatMap { partyOf(it) }
+    }
+
+    private fun typesText(mon: Pokemon) = mon.types.joinToString("/") { SynergyEngine.TYPE_KO[it.name.lowercase()] ?: it.name }
+
     private fun choose(service: Any, p: ServerPlayer, pilot: Pilot, run: Any, state: DraftState, prep: DraftPreparation,
                        displays: List<Pair<PokemonEntity, Vec3>>, choices: List<String>, now: Int) {
         val party = (call(run, "getParty") as PlayerPartyStore).toList()
-        val counts = SynergyEngine.countTypes(party)
-        fun score(list: List<Pokemon>): Int = SynergyEngine.traits(SynergyEngine.countTypes(list)).sumOf { (it.activeTier + 1) * 10 } +
-            list.sumOf { m -> m.types.sumOf { t -> counts[t.name.lowercase()] ?: 0 } }
-        var best = -1; var bestSlot = -1; var bestScore = Int.MIN_VALUE
+        val threats = threats(service, p.uuid)
+        val now0 = BotBrain.partyScore(party, threats)
+        var best = -1; var bestSlot = -1; var bestScore = Double.NEGATIVE_INFINITY
         for ((i, d) in displays.withIndex()) {
             if (i >= choices.size || d.first.isRemoved) continue
-            val mon = d.first.pokemon
-            if (party.size < 6) {
-                val s = score(party + mon)
-                if (s > bestScore) { bestScore = s; best = i; bestSlot = -1 }
-            } else for (slot in party.indices) {
-                val s = score(party.toMutableList().also { it[slot] = mon })
-                if (s > bestScore) { bestScore = s; best = i; bestSlot = slot }
-            }
+            val (score, slot) = BotBrain.bestPlacement(party, d.first.pokemon, threats)
+            if (score > bestScore) { bestScore = score; best = i; bestSlot = slot }
         }
         if (best < 0) return
-        val now0 = score(party)
         val mon = displays[best].first.pokemon
+        val gain = bestScore - now0
         pilot.lastAction = now
-        // 파티가 3마리 이상인데 후보가 시너지를 늘리지 못하면, 리롤이 남아 있을 때 한 번 리롤
-        if (party.size >= 3 && bestScore <= now0 && prep.rerolls > 0 && pilot.rerolledFor != state.version) {
+        // 후보가 파티를 거의 강하게 하지 못하면 리롤이 남아 있을 때 리롤 (후보마다 한 번)
+        val weak = if (party.size < 6) gain < 25 else gain < 6
+        if (party.size >= 2 && weak && prep.rerolls > 0 && pilot.rerolledFor != state.version) {
             pilot.rerolledFor = state.version
+            TestLog.log("bot", "${p.scoreboardName} 리롤 (최고 후보 이득 ${"%.1f".format(gain)})")
             act(p, pilot, now, "reroll") { addProperty("version", state.version); addProperty("revision", prep.revision) }
             return
         }
-        if (party.size >= 6 && bestScore <= now0) {
+        if (party.size >= 6 && gain <= 0.5) {
             act(p, pilot, now, "pick_skip") { addProperty("version", state.version) }
-            TestLog.log("bot", "${p.scoreboardName} 영입 건너뜀 (후보가 시너지를 늘리지 못함)")
+            TestLog.log("bot", "${p.scoreboardName} 영입 건너뜀 (후보가 파티를 강하게 하지 못함)")
             return
         }
         val json = JsonObject().apply {
@@ -284,11 +303,91 @@ object DungeonBot {
         val replaced = if (bestSlot >= 0) " (${party[bestSlot].species.translatedName.string} 대신)" else ""
         runCatching { pickMethod(service).invoke(service, p, json, true) }
             .onSuccess {
-                val types = mon.types.joinToString("/") { SynergyEngine.TYPE_KO[it.name.lowercase()] ?: it.name }
-                TestLog.log("bot", "${p.scoreboardName} 영입: ${mon.species.translatedName.string}($types)$replaced")
-                say(p.server, "[${who(p)}] 영입: ${mon.species.translatedName.string}($types)$replaced")
+                val why = "종족값 ${BotBrain.bst(mon)} · 점수 +${"%.0f".format(gain)}"
+                TestLog.log("bot", "${p.scoreboardName} 영입: ${mon.species.translatedName.string}(${typesText(mon)})$replaced $why")
+                say(p.server, "[${who(p)}] 영입: ${mon.species.translatedName.string}(${typesText(mon)})$replaced · $why")
+                remember(p, pilot, run, threats)
             }
             .onFailure { e -> TestLog.log("bot", "${p.scoreboardName} 영입 실패: ${(e.cause ?: e)}") }
+    }
+
+    private fun learnable(mon: Pokemon) = runCatching { dev.cobbleleague.DungeonLearnset.entries(mon).keys }.getOrDefault(emptySet())
+
+    /** 파티 포켓몬마다 배우면 좋은 기술을 기억한다 (다음 상대 기준). 준비 단계에서 돈·무료 학습으로 산다. */
+    private fun remember(p: ServerPlayer, pilot: Pilot, run: Any, threats: List<Pokemon>) {
+        val party = runCatching { (call(run, "getParty") as PlayerPartyStore).toList() }.getOrDefault(emptyList())
+        pilot.wishes.keys.retainAll(party.map { it.uuid }.toSet())
+        for (mon in party) {
+            val lesson = BotBrain.bestLesson(mon, learnable(mon), threats)
+            if (lesson == null || lesson.third < 20) { pilot.wishes.remove(mon.uuid); continue }
+            val before = pilot.wishes[mon.uuid]?.first
+            pilot.wishes[mon.uuid] = lesson.first.name to lesson.second
+            if (before != lesson.first.name) TestLog.log("bot", "${p.scoreboardName} 기술 기억: ${mon.species.translatedName.string} ← ${lesson.first.displayName.string} (이득 ${"%.0f".format(lesson.third)})")
+        }
+    }
+
+    /** 기억한 기술을 산다 (무료 학습 먼저, 없으면 기술머신 값). 산 것이 있으면 true */
+    private fun lessons(service: Any, p: ServerPlayer, pilot: Pilot, run: Any, prep: DraftPreparation, now: Int): Boolean {
+        if (prep.freeLessons <= 0 && prep.money < DungeonShop.TM_PRICE) return false
+        val key = "lesson:${prep.revision}"
+        if (pilot.boughtFor == key) return false
+        val threats = threats(service, p.uuid)
+        remember(p, pilot, run, threats) // 상대가 정해졌으면 다시 계산
+        val party = (call(run, "getParty") as PlayerPartyStore).toList()
+        // 무료 학습이 없을 때는 돈을 장비에도 써야 하므로 이득이 충분히 큰 기술만 산다
+        val pick = party.filter { it.uuid in pilot.wishes }
+            .mapNotNull { mon -> BotBrain.bestLesson(mon, learnable(mon), threats)?.let { mon to it } }
+            .filter { (_, l) -> prep.freeLessons > 0 || l.third >= 35 }
+            .maxByOrNull { it.second.third } ?: return false
+        val (mon, lesson) = pick
+        val (move, slot, gain) = lesson
+        pilot.boughtFor = key
+        val old = mon.moveSet[slot]?.template?.displayName?.string ?: "빈 칸"
+        TestLog.log("bot", "${p.scoreboardName} 기술 구매: ${mon.species.translatedName.string} $old → ${move.displayName.string} (이득 ${"%.0f".format(gain)}, ${if (prep.freeLessons > 0) "무료 학습" else "${DungeonShop.TM_PRICE}원"})")
+        say(p.server, "[${who(p)}] 기술 학습: ${mon.species.translatedName.string} $old → ${move.displayName.string}")
+        act(p, pilot, now, "buy") {
+            addProperty("pokemon", mon.uuid.toString()); addProperty("operation", "tm"); addProperty("move", move.name)
+            addProperty("slot", slot); addProperty("revision", prep.revision)
+        }
+        pilot.wishes.remove(mon.uuid)
+        return true
+    }
+
+    /** 환상 뽑기권 사용, 대기 중인 보상 포켓몬(전설·환상)은 파티를 강하게 하면 영입하고 아니면 포기. 한 것이 있으면 true */
+    private fun rewards(service: Any, p: ServerPlayer, pilot: Pilot, run: Any, prep: DraftPreparation, now: Int): Boolean {
+        val wallet = field(run, "rewardWallet") ?: return false
+        val pending = runCatching { call(wallet, "getPending") }.getOrNull()
+        if (pending == null) {
+            val tickets = runCatching { call(wallet, "count", dev.cobbleleague.CreepRewardKind.MYTHICAL) as Int }.getOrDefault(0)
+            if (tickets <= 0 || pilot.rewardStep == "draw:${prep.revision}") return false
+            pilot.rewardStep = "draw:${prep.revision}"
+            act(p, pilot, now, "reward_draw") { addProperty("kind", "mythical"); addProperty("revision", prep.revision) }
+            return true
+        }
+        val token = call(pending, "getToken").toString()
+        val mon = field(run, "pendingRewardPokemon") as? Pokemon
+        if (mon == null) {
+            if (pilot.rewardStep == "view:$token") return false
+            pilot.rewardStep = "view:$token"
+            act(p, pilot, now, "reward_view"); return true
+        }
+        if (pilot.rewardStep == "done:$token:${prep.revision}") return false
+        pilot.rewardStep = "done:$token:${prep.revision}"
+        val party = (call(run, "getParty") as PlayerPartyStore).toList()
+        val threats = threats(service, p.uuid)
+        val (score, slot) = BotBrain.bestPlacement(party, mon, threats)
+        if (score > BotBrain.partyScore(party, threats)) {
+            val replaced = if (slot >= 0) " (${party[slot].species.translatedName.string} 대신)" else ""
+            say(p.server, "[${who(p)}] 보상 영입: ${mon.species.translatedName.string}(${typesText(mon)})$replaced")
+            act(p, pilot, now, "reward_accept") {
+                addProperty("token", token); addProperty("revision", prep.revision)
+                if (slot >= 0) addProperty("replace", party[slot].uuid.toString())
+            }
+        } else {
+            TestLog.log("bot", "${p.scoreboardName} 보상 포기: ${mon.species.translatedName.string}")
+            act(p, pilot, now, "reward_decline") { addProperty("token", token); addProperty("revision", prep.revision) }
+        }
+        return true
     }
 
     // ------------------------------------------------------------------ 전투
@@ -331,7 +430,7 @@ object DungeonBot {
             if (!b.ended && actor.request === request && actor.responses.isEmpty()) {
                 pilot.answered = request
                 pilot.answeredAt = lastTick
-                TestDriver.choose(actor, request)
+                TestDriver.choose(actor, request, smart = true)
             }
         }
     }

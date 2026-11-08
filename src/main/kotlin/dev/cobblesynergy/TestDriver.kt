@@ -55,9 +55,13 @@ object TestDriver {
         actors.remove(uuid); scheduled.remove(uuid); answered.remove(uuid)
     }
 
-    fun choose(actor: BattleActor, request: ShowdownActionRequest) {
+    /** smart: AI 트레이너용. 상대 현재 포켓몬에게 가장 아픈 기술을 쓰고, 통하는 기술이 없으면 유리한 포켓몬으로 교체한다. */
+    fun choose(actor: BattleActor, request: ShowdownActionRequest, smart: Boolean = false) {
         try {
-            val responses = request.iterate(actor.activePokemon) { active, moveset, forceSwitch -> pick(actor, active, moveset, forceSwitch) }
+            val responses = request.iterate(actor.activePokemon) { active, moveset, forceSwitch ->
+                (if (smart) runCatching { smartPick(actor, active, moveset, forceSwitch) }.getOrNull() else null)
+                    ?: pick(actor, active, moveset, forceSwitch)
+            }
             actor.setActionResponses(responses)
             choices++
         } catch (e: Exception) {
@@ -66,6 +70,36 @@ object TestDriver {
         } finally {
             actor.pokemonList.forEach { it.willBeSwitchedIn = false }
         }
+    }
+
+    private fun smartPick(actor: BattleActor, active: ActiveBattlePokemon, moveset: ShowdownMoveset?, forceSwitch: Boolean): ShowdownActionResponse? {
+        val foeMon = actor.battle.sides.first { s -> actor !in s.actors }.activePokemon.firstNotNullOfOrNull { it.battlePokemon?.takeIf { b -> b.health > 0 } }
+        val foe = foeMon?.let { BotBrain.types(it.effectedPokemon) }.orEmpty()
+        val activeIds = actor.activePokemon.mapNotNull { it.battlePokemon?.uuid }.toSet()
+        val bench = actor.pokemonList.filter { it.health > 0 && !it.gone && it.uuid !in activeIds && !it.willBeSwitchedIn }
+        fun switchTo(b: com.cobblemon.mod.common.battles.pokemon.BattlePokemon): ShowdownActionResponse {
+            b.willBeSwitchedIn = true
+            return SwitchActionResponse(b.uuid)
+        }
+        if (forceSwitch || moveset == null) {
+            val best = bench.maxByOrNull { BotBrain.switchScore(it.effectedPokemon, foe) } ?: return null
+            return switchTo(best)
+        }
+        val self = active.battlePokemon ?: return null
+        val hp = self.health.toDouble() / self.maxHealth.coerceAtLeast(1)
+        val usable = moveset.moves.filter { !it.disabled && it.pp > 0 }
+        if (usable.isEmpty()) return null
+        val scored = usable.map { it to BotBrain.battleMoveScore(self.effectedPokemon, it.id, foe, hp) }
+        val (move, score) = scored.maxBy { it.second }
+        // 쓸 기술이 거의 안 통하면(무효·반감뿐) 더 유리한 포켓몬으로 교체 (갇힘 상태면 Showdown 이 거절하므로 기술로 대체)
+        if (score < 35 && !moveset.trapped && bench.isNotEmpty()) {
+            val best = bench.maxBy { BotBrain.switchScore(it.effectedPokemon, foe) }
+            if (BotBrain.switchScore(best.effectedPokemon, foe) > BotBrain.switchScore(self.effectedPokemon, foe) + 1.0) return switchTo(best)
+        }
+        val chosen = if (Math.random() < 0.1) usable.random() else move // 10% 는 다른 기술로 예측을 피한다
+        val target = runCatching { chosen.getTargets(active)?.firstOrNull()?.getPNX() }.getOrNull()
+        val r = MoveActionResponse(chosen.id, target, null)
+        return if (runCatching { r.isValid(active, moveset, false) }.getOrDefault(true)) r else null
     }
 
     private fun pick(actor: BattleActor, active: ActiveBattlePokemon, moveset: ShowdownMoveset?, forceSwitch: Boolean): ShowdownActionResponse {
