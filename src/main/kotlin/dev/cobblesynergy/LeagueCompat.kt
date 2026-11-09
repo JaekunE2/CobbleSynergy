@@ -12,6 +12,8 @@ object LeagueCompat {
     val protocol: Int get() = protocolFor(version)
     /** CobbleLeague 에 연출 멈춤 복구가 없으면 CobbleSynergy 가 대신한다 */
     fun protocolFor(value:String):Int {
+        val minor=value.split('.').getOrNull(1)?.toIntOrNull()?:0
+        if(minor>=8)return 11
         val patch=value.substringBefore('+').substringBefore('-').split('.').getOrNull(2)?.toIntOrNull()?:return 11
         return when{patch>=4->11;patch==3->10;else->9}
     }

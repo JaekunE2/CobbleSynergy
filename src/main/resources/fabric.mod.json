@@ -7,10 +7,22 @@
   "license": "MIT",
   "environment": "*",
   "entrypoints": {
-    "main": [ { "adapter": "kotlin", "value": "dev.cobblesynergy.CobbleSynergy" } ],
-    "client": [ { "adapter": "kotlin", "value": "dev.cobblesynergy.client.CobbleSynergyClient" } ]
+    "main": [
+      {
+        "adapter": "kotlin",
+        "value": "dev.cobblesynergy.CobbleSynergy"
+      }
+    ],
+    "client": [
+      {
+        "adapter": "kotlin",
+        "value": "dev.cobblesynergy.client.CobbleSynergyClient"
+      }
+    ]
   },
-  "mixins": [ "cobblesynergy.mixins.json" ],
+  "mixins": [
+    "cobblesynergy.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.17.2",
     "minecraft": "1.21.1",
@@ -18,6 +30,6 @@
     "fabric-api": "*",
     "fabric-language-kotlin": ">=1.13.6+kotlin.2.2.20",
     "cobblemon": "1.7.3",
-    "cobbleleague": "0.7.7"
+    "cobbleleague": "0.8.0"
   }
 }
