@@ -112,9 +112,9 @@ class CobbleSynergy : ModInitializer {
                 Command.SINGLE_SUCCESS
             })).then(Commands.literal("on").executes { ctx -> toggleCommand(ctx.source.playerOrException, true) })
                 .then(Commands.literal("off").executes { ctx -> toggleCommand(ctx.source.playerOrException, false) })
-            // 테스트 빌드 전용 명령: 배포판에는 등록하지 않는다
-            if (TestMode.enabled) root.then(Commands.literal("bot").executes { ctx ->
-                ctx.source.sendSystemMessage(Component.literal(DungeonBot.spawn(ctx.source.server, ctx.source.player)))
+            // AI 트레이너: 운영자·싱글 방장만 (로비의 [AI 트레이너 추가] 버튼과 같은 규칙). 자동 입장은 없다.
+            root.then(Commands.literal("bot").requires { botAllowed(it) }.executes { ctx ->
+                ctx.source.sendSystemMessage(Component.literal(DungeonBot.addOne(ctx.source.server, ctx.source.player)))
                 Command.SINGLE_SUCCESS
             }.then(Commands.argument("count", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, DungeonBot.MAX_BOTS)).executes { ctx ->
                 val n = com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "count")
@@ -126,7 +126,9 @@ class CobbleSynergy : ModInitializer {
             }).then(Commands.literal("stop").executes { ctx ->
                 ctx.source.sendSystemMessage(Component.literal(DungeonBot.remove(ctx.source.server)))
                 Command.SINGLE_SUCCESS
-            })).then(Commands.literal("auto").executes { ctx ->
+            }))
+            // 테스트 빌드 전용 명령: 배포판에는 등록하지 않는다
+            if (TestMode.enabled) root.then(Commands.literal("auto").executes { ctx ->
                 val p = ctx.source.playerOrException
                 DungeonBot.setAuto(p, p.uuid !in DungeonBot.autoPlayers)
                 ctx.source.sendSystemMessage(Component.literal("자동 조작: " + if (p.uuid in DungeonBot.autoPlayers) "켬" else "끔"))
@@ -145,6 +147,12 @@ class CobbleSynergy : ModInitializer {
             dispatcher.register(root)
         }
     }
+
+    /** AI 트레이너를 넣고 뺄 수 있는 사람: 운영자(2) 또는 싱글 월드 방장 */
+    fun botAllowed(player: ServerPlayer?): Boolean =
+        player != null && (player.hasPermissions(2) || player.server.isSingleplayerOwner(player.gameProfile))
+    private fun botAllowed(source: net.minecraft.commands.CommandSourceStack): Boolean =
+        source.hasPermission(2) || source.player?.let { botAllowed(it) } == true
 
     private fun toggleCommand(player: ServerPlayer, value: Boolean): Int {
         val refused = SynergySwitch.request(player, value)
@@ -168,7 +176,7 @@ class CobbleSynergy : ModInitializer {
         if (tick % 4 == 0) SynergyFeed.tick()
         if (TestMode.enabled) TestSuite.tick(tick, server)
         AnimationRecovery.tick(tick)
-        if (TestMode.enabled) DungeonBot.tick(server, tick)
+        DungeonBot.tick(server, tick) // AI 트레이너가 없으면 아무것도 하지 않는다
         if (tick % SYNC_INTERVAL != 0) return
         applyOdds(server)
         for (player in server.playerList.players) sync(player)
@@ -228,9 +236,9 @@ class CobbleSynergy : ModInitializer {
         if (!ServerPlayNetworking.canSend(player, SynergyPayload.TYPE)) return
         val party = LeagueBridge.draftParty(player.uuid)
         val json = if (party == null) {
-            JsonObject().apply { addProperty("active", false); addProperty("enabled", SynergySwitch.enabled) }.toString()
+            JsonObject().apply { addProperty("active", false); addProperty("enabled", SynergySwitch.enabled); addProperty("canBot", botAllowed(player)) }.toString()
         } else {
-            SynergyEngine.uiJson(SynergyEngine.traits(SynergyEngine.countTypes(party))).apply { addProperty("enabled", SynergySwitch.enabled) }.toString()
+            SynergyEngine.uiJson(SynergyEngine.traits(SynergyEngine.countTypes(party))).apply { addProperty("enabled", SynergySwitch.enabled); addProperty("canBot", botAllowed(player)) }.toString()
         }
         if (lastSent[player.uuid] == json) return
         lastSent[player.uuid] = json

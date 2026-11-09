@@ -1,4 +1,5 @@
-﻿CobbleSynergy 0.3.0 / CobbleLeague 0.7.4
+﻿CobbleSynergy 0.3.7 / CobbleLeague 0.7.7
 
 플레이어는 코블리그 통합 친구용 설치 ZIP을 사용합니다. 설치 후 Modrinth Play에서 업데이트 확인과 동일 프로필 재실행을 제공합니다.
-U: 도감 / F4: 시너지와 경기 관전. 자세한 사용법·페어리 변경 내용은 README.md입니다.
+U: 도감 / F4: 시너지와 경기 관전.
+AI 트레이너: F4 던전 로비 창 오른쪽 위 [AI 트레이너 추가] (운영자·싱글 방장만, 최대 7명, 빼기 /synergy bot stop). 자세한 사용법·페어리 변경 내용은 README.md입니다.

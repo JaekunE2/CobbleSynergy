@@ -39,11 +39,15 @@ object SynergyClientState {
     /** 서버의 던전 시너지 켜기/끄기 상태 */
     @Volatile var enabled = true
         private set
+    /** 이 플레이어가 AI 트레이너를 넣을 수 있는지 (운영자·싱글 방장) */
+    @Volatile var canBot = false
+        private set
 
     fun update(json: String) {
         val root = runCatching { JsonParser.parseString(json).asJsonObject }.getOrNull() ?: return
         active = root.get("active")?.asBoolean == true
         enabled = root.get("enabled")?.asBoolean != false
+        canBot = root.get("canBot")?.asBoolean == true
         traits = if (!active) emptyList() else parse(root)
     }
 
