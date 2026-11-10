@@ -6,5 +6,6 @@ class LeagueCompatTest {
   assertEquals(10,LeagueCompat.protocolFor("0.7.3"));assertEquals(11,LeagueCompat.protocolFor("0.7.7"))
   assertEquals(11,LeagueCompat.protocolFor("0.7.10+dev"))
   assertEquals(11,LeagueCompat.protocolFor("0.8.0"))
+  assertEquals(11,LeagueCompat.protocolFor("0.8.1"))
  }
 }
